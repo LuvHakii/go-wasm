@@ -1,0 +1,9 @@
+diff --git a/src/runtime/memprofile_stub.go b/src/runtime/memprofile_stub.go
+new file mode 100644
+index 0000000..c13acd8
+--- /dev/null
++++ b/src/runtime/memprofile_stub.go
+@@ -0,0 +1,3 @@
++package runtime
++
++var MemProfileRate int = 512 * 1024
