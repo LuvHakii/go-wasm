@@ -1,0 +1,6 @@
+@@
+@@
+ func ToolPath(toolName string) (string, error) {
++	return browserToolPath(toolName)
+ ...
+ }
