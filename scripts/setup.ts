@@ -7,11 +7,7 @@ checkRoot();
 const { version, revision, sha256, url } = lock.go;
 mkdirSync(`${ROOT}/downloads`, { recursive: true });
 const archive = Bun.file(`${ROOT}/downloads/${version}.src.tar.gz`);
-if (!(await archive.exists())) {
-	const response = await fetch(url);
-	if (!response.ok) throw new Error(`source download failed: ${response.status}`);
-	await Bun.write(archive, response);
-}
+if (!(await archive.exists())) await $`curl -fsSL -o ${archive.name} ${url}`;
 if (createHash("sha256").update(await archive.bytes()).digest("hex") !== sha256) {
 	throw new Error(`source archive checksum mismatch: ${archive.name}`);
 }
