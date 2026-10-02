@@ -1,8 +1,0 @@
-@@
-@@
- func (b *Builder) toolID(name string) string {
- 	return b.toolIDCache.Do(name, func() string {
-+		return browserToolID(name)
- 		...
- 	})
- }

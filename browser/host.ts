@@ -1,6 +1,12 @@
-import type {} from './jspi-types';
 import { WASI, Fd, File, Directory, PreopenDirectory, ConsoleStdout, wasi } from '@bjorn3/browser_wasi_shim';
 import { Mailbox } from './mailbox';
+
+declare global {
+	namespace WebAssembly {
+		const Suspending: new (fn: (...args: number[]) => Promise<number>) => (...args: number[]) => number;
+		function promising(fn: Function): (...args: number[]) => Promise<unknown>;
+	}
+}
 
 export type SavedFile = { path: string; bytes: Uint8Array; readonly: boolean };
 export type Command = { argv: string[]; env: string[]; cwd: string };

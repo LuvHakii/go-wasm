@@ -1,6 +1,0 @@
-@@
-@@
- func (sh *Shell) runOut(dir string, env []string, cmdargs ...any) ([]byte, error) {
-+	return sh.browserRunOut(dir, env, cmdargs...)
- ...
- }

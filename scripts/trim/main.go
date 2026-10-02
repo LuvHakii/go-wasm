@@ -129,7 +129,7 @@ func rewrite(file string, edits []edit) {
 	}
 	for _, e := range edits {
 		if err := e(fset, f); err != nil {
-			log.Fatalf("%s: %v (update scripts/trim/main.go for this Go version)", file, err)
+			log.Fatalf("%s: %v (update the rule in scripts/trim for this revision)", file, err)
 		}
 	}
 	pruneImports(fset, f)

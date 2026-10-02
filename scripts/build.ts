@@ -1,8 +1,8 @@
 import { $ } from "bun";
 import { createHash } from "node:crypto";
-import { createReadStream, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname } from "node:path";
-import { checkRoot, lock, NATIVE_GO as nativeGo, REPO as repo, ROOT as root, SOURCE as source, TOOLS as tools } from "./common.ts";
+import { checkRoot, hash, lock, NATIVE_GO as nativeGo, REPO as repo, ROOT as root, SOURCE as source, TOOLS as tools } from "./common.ts";
 
 checkRoot();
 const archive = `${root}/downloads/${lock.go.version}.src.tar.gz`;
@@ -15,12 +15,6 @@ const env = {
 	GOPROXY: "off", GOTOOLDIR: "", GOCACHEPROG: "", GO111MODULE: "on", GOTELEMETRY: "off",
 };
 mkdirSync(env.GOTMPDIR, { recursive: true });
-
-async function hash(path: string) {
-	const digest = createHash("sha256");
-	for await (const chunk of createReadStream(path)) digest.update(chunk);
-	return digest.digest("hex");
-}
 
 const buildLock = `${root}/build.lock`;
 mkdirSync(buildLock);
@@ -52,15 +46,15 @@ try {
 	const { GOOS: _os, GOARCH: _arch, ...hostEnv } = env;
 	await $`${nativeGo} run . ${source}`.cwd(`${repo}/scripts/trim`).env({ ...hostEnv, GOROOT: `${root}/go` });
 	// gopatch silently does nothing when its pattern misses, so every target must gain its browser call.
-	const insertions: [string, string, string][] = [
-		["work-runout.patch", "cmd/go/internal/work/shell.go", "browserRunOut"],
-		["work-toolid.patch", "cmd/go/internal/work/buildid.go", "browserToolID"],
-		["base-toolpath.patch", "cmd/go/internal/base/tool.go", "browserToolPath"],
+	const insertions: [string, string][] = [
+		["cmd/go/internal/work/shell.go", "browserRunOut"],
+		["cmd/go/internal/work/buildid.go", "browserToolID"],
+		["cmd/go/internal/base/tool.go", "browserToolPath"],
 	];
-	for (const [patch, target, marker] of insertions) {
+	for (const [target, marker] of insertions) {
 		const file = `${source}/src/${target}`;
-		await $`${root}/bin/gopatch -p ${repo}/scripts/gopatch/${patch} ${file}`;
-		if (!(await Bun.file(file).text()).includes(marker)) throw new Error(`gopatch ${patch} did not apply to ${target}; update scripts/gopatch for this Go version`);
+		await $`${root}/bin/gopatch -p ${repo}/scripts/gopatch/browser.patch ${file}`;
+		if (!(await Bun.file(file).text()).includes(marker)) throw new Error(`gopatch browser.patch did not apply to ${target}; update scripts/gopatch for this Go version`);
 	}
 	cpSync(`${repo}/scripts/overlay`, source, { recursive: true });
 	cpSync(`${tools}/internal/browserhost`, `${source}/src/internal/browserhost`, { recursive: true });
@@ -73,8 +67,6 @@ try {
 	}
 
 	staging = mkdtempSync(`${repo}/.dist-stage-`);
-	const measurement = `${root}/measurement`;
-	mkdirSync(measurement, { recursive: true });
 	const buildMetadata: { path: string; goVersion: string; goSourceRevision: string; buildSettings: typeof buildSettings; sourceArchiveSha256: string; toolPackage: string }[] = [];
 	for (const [name, pkg, cwd] of [
 		["go", "cmd/go", source], ["link", "cmd/link", source], ["asm", "cmd/asm", source], ["gopls", ".", `${tools}/gopls`], ["compile", "cmd/compile", source],
@@ -85,7 +77,6 @@ try {
 		// cmd_go_bootstrap swaps net/http, vcs and auth for stubs: the browser go command never fetches.
 		const tags = name === "go" ? "cmd_go_bootstrap" : "";
 		await $`${nativeGo} build -mod=readonly -buildvcs=false -trimpath -tags=${tags} -ldflags=${buildSettings.ldflags} -o ${staging}/${name}.wasm ${pkg}`.env(env).cwd(cwd);
-		await $`${nativeGo} build -mod=readonly -buildvcs=false -trimpath -tags=${tags} -o ${measurement}/${name}.wasm ${pkg}`.env(env).cwd(cwd);
 		buildMetadata.push({ path: `${name}.wasm`, goVersion: lock.go.version, goSourceRevision: lock.go.revision, buildSettings, sourceArchiveSha256: lock.go.sha256, toolPackage: pkg });
 	}
 
@@ -168,7 +159,7 @@ try {
 	catch (error) { if (existsSync(previous)) renameSync(previous, dist); throw error; }
 	staging = undefined;
 	rmSync(previous, { recursive: true, force: true });
-	console.log(JSON.stringify({ dist, measurement, artifacts, stdCacheBrowserCompatibility: "unverified" }));
+	console.log(JSON.stringify({ dist, artifacts, stdCacheBrowserCompatibility: "unverified" }));
 } finally {
 	if (staging) rmSync(staging, { recursive: true, force: true });
 	rmSync(buildLock, { recursive: true, force: true });

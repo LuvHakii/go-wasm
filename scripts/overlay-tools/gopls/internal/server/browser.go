@@ -3,10 +3,25 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
 
+	"golang.org/x/tools/gopls/internal/cache"
 	"golang.org/x/tools/gopls/internal/golang"
 	"golang.org/x/tools/gopls/internal/protocol"
+	"golang.org/x/tools/gopls/internal/vulncheck"
 )
+
+func serveDebug(ctx context.Context, addr string) (string, error) {
+	return "", errors.New("the debug server is unavailable in the browser")
+}
+
+func runGovulncheck(ctx context.Context, pattern string, snapshot *cache.Snapshot, dir string, out io.Writer) (*vulncheck.Result, error) {
+	return nil, errors.New("govulncheck is unavailable in the browser")
+}
+
+func startCPUProfile(io.Writer) error { return errors.New("profiling is not supported in the browser") }
+
+func stopCPUProfile() {}
 
 type web struct{ server webServer }
 
