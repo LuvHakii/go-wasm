@@ -1,0 +1,105 @@
+name: build
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish release <yyyymmdd-hhmm> UTC. Off = dry run, artifact only, 7 days."
+        type: boolean
+        default: false
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  ROOT: /home/runner/go-wasm-build
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: bootstrap Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+
+      - name: versions
+        run: bun scripts/common.ts >> "$GITHUB_ENV"
+
+      - name: cache Go source, native toolchain, modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ROOT }}/downloads
+            ${{ env.ROOT }}/go
+            ${{ env.ROOT }}/module-cache
+          key: go-${{ env.GO_VERSION }}-${{ hashFiles('source-lock.json', 'scripts/setup.ts', 'scripts/common.ts') }}
+
+      - name: install deps
+        run: |
+          bun install --frozen-lockfile
+          bunx --bun playwright install --with-deps chromium
+
+      - name: typecheck
+        run: bunx --bun tsc --noEmit
+
+      - name: setup
+        run: bun scripts/setup.ts
+
+      - name: build standard-Go tools
+        run: bun scripts/build.ts
+
+      - name: "gate: standard-Go dist"
+        run: bun test/browser.ts ./dist
+
+      - name: build TinyGo link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/build-tinygo.ts
+
+      - name: "gate: TinyGo dist"
+        run: bun test/browser.ts ./dist-tinygo
+
+      - name: stage release
+        run: |
+          mkdir -p release
+          cp dist/*.wasm dist/*.tar dist/tool-manifest.json release/
+          cp dist-tinygo/link.wasm release/link.tinygo.wasm
+          cp dist-tinygo/tool-manifest.json release/tool-manifest.tinygo.json
+          printf '{"go":"%s","toolsRev":"%s","tinygoCommit":"%s","patches":[%s]}' \
+            "$GO_VERSION" "$TOOLS_REV" "$TINYGO_COMMIT" \
+            "$(ls patches | sed 's/.*/"&"/' | paste -sd, -)" > release/versions.json
+          ls -la release/
+
+      - name: upload dry run
+        if: '!inputs.release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-wasm-dryrun-${{ github.sha }}
+          path: release/
+          retention-days: 7
+
+      - name: release
+        if: inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOW=$(date -u +%s)
+          TAG=$(date -u -d "@$NOW" +%Y%m%d-%H%M)
+          NOTES=$(printf 'Go: %s\nx/tools: %s\nTinyGo: %s\n%s\n' \
+            "$GO_VERSION" "$TOOLS_REV" "$TINYGO_COMMIT" "$(date -u -d "@$NOW" +%FT%TZ)")
+          gh release create "$TAG" release/* \
+            --target "$GITHUB_SHA" \
+            --title "${GITHUB_SHA::7}" \
+            --notes "$NOTES" \
+          || gh release upload "$TAG" release/* --clobber
