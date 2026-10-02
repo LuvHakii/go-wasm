@@ -6,12 +6,12 @@ import { checkRoot, GO, goEnv, lock, NATIVE_GO, patches, REPO, ROOT, TOOLS } fro
 checkRoot();
 const { version, revision, sha256, url } = lock.go;
 mkdirSync(`${ROOT}/downloads`, { recursive: true });
-const archive = Bun.file(`${ROOT}/downloads/${version}.src.tar.gz`);
-if (!(await archive.exists())) await $`curl -fsSL -o ${archive.name} ${url}`;
-if (createHash("sha256").update(await archive.bytes()).digest("hex") !== sha256) {
-	throw new Error(`source archive checksum mismatch: ${archive.name}`);
+const archive = `${ROOT}/downloads/${version}.src.tar.gz`;
+if (!existsSync(archive)) await $`curl -fsSL -o ${archive} ${url}`;
+if (createHash("sha256").update(await Bun.file(archive).bytes()).digest("hex") !== sha256) {
+	throw new Error(`source archive checksum mismatch: ${archive}`);
 }
-if (!existsSync(GO)) await $`tar -xzf ${archive.name} -C ${ROOT}`;
+if (!existsSync(GO)) await $`tar -xzf ${archive} -C ${ROOT}`;
 if (!(await Bun.file(`${GO}/VERSION`).text()).startsWith(`${version}\n`)) throw new Error("unexpected Go source VERSION");
 const bootstrap = process.env.GOROOT_BOOTSTRAP ?? (await $`go env GOROOT`.text()).trim();
 const env = goEnv({ GOROOT_BOOTSTRAP: bootstrap });
