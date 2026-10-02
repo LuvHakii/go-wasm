@@ -16,6 +16,7 @@ var (
 	valuesType = reflect.TypeFor[[]reflect.Value]()
 	anysType   = reflect.TypeFor[[]any]()
 	stringType = reflect.TypeFor[string]()
+	intType    = reflect.TypeFor[int]()
 	stringsTyp = reflect.TypeFor[[]string]()
 )
 
@@ -67,6 +68,16 @@ func sigOf(fn any) *tfn {
 		return &tfn{in: []reflect.Type{stringsTyp, stringType}, call: func(a []reflect.Value) (reflect.Value, error) {
 			return reflect.ValueOf(f(argAs[[]string](a[0]), argAs[string](a[1]))), nil
 		}}
+	case func() any:
+		return &tfn{call: func([]reflect.Value) (reflect.Value, error) { return reflect.ValueOf(f()), nil }}
+	case func(int) int:
+		return &tfn{in: []reflect.Type{intType}, call: func(a []reflect.Value) (reflect.Value, error) {
+			return reflect.ValueOf(f(argAs[int](a[0]))), nil
+		}}
+	case func(int, int) int:
+		return &tfn{in: []reflect.Type{intType, intType}, call: func(a []reflect.Value) (reflect.Value, error) {
+			return reflect.ValueOf(f(argAs[int](a[0]), argAs[int](a[1]))), nil
+		}}
 	case func(...any) string:
 		return &tfn{in: []reflect.Type{anysType}, variadic: true, call: func(a []reflect.Value) (reflect.Value, error) {
 			return reflect.ValueOf(f(anysOf(a)...)), nil
@@ -112,7 +123,9 @@ func addValueFuncsSig(out map[string]reflect.Value, in FuncMap) {
 		}
 		sig := sigOf(fn)
 		if sig == nil {
-			panic("function " + name + " has a signature this build cannot call")
+			sig = &tfn{in: []reflect.Type{anysType}, variadic: true, call: func([]reflect.Value) (reflect.Value, error) {
+				return reflect.Value{}, fmt.Errorf("function %s has a signature this build cannot call", name)
+			}}
 		}
 		out[name] = reflect.ValueOf(sig)
 	}

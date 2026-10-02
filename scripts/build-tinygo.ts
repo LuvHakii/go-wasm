@@ -1,7 +1,7 @@
 import { $ } from "bun";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { goEnv, hash, lock, NATIVE_GO, REPO, ROOT, SOURCE, TINYGO, TINYGO_GOROOT } from "./common.ts";
+import { goEnv, hash, lock, NATIVE_GO, REPO, ROOT, SOURCE, TINYGO, TINYGO_GOROOT, TOOLS } from "./common.ts";
 
 const download = `${ROOT}/downloads/tinygo-${lock.tinygo.commit.slice(0, 8)}.tar.gz`;
 mkdirSync(`${ROOT}/downloads`, { recursive: true });
@@ -46,6 +46,12 @@ for (const [target, marker] of callMarkers) {
 	if (!(await Bun.file(file).text()).includes(marker)) throw new Error(`gopatch tinygo.patch did not apply to ${target}; update scripts/gopatch/tinygo.patch for this Go version`);
 }
 
+const asmGoroot = `${ROOT}/tinygo-goroot-asm`;
+rmSync(asmGoroot, { recursive: true, force: true });
+cpSync(TINYGO_GOROOT, asmGoroot, { recursive: true });
+rmSync(`${asmGoroot}/src/cmd/internal/obj`, { recursive: true, force: true });
+cpSync(`${ROOT}/go/src/cmd/internal/obj`, `${asmGoroot}/src/cmd/internal/obj`, { recursive: true });
+
 const dist = `${REPO}/dist`;
 const out = `${REPO}/dist-tinygo`;
 rmSync(out, { recursive: true, force: true });
@@ -58,11 +64,11 @@ const env = goEnv({
 const manifestPath = `${out}/tool-manifest.json`;
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const built: { path: string; size: number }[] = [];
-for (const [name, pkg, tags] of [["link", "cmd/link", ""], ["go", "cmd/go", "cmd_go_bootstrap"]] as const) {
+for (const [name, pkg, tags, goroot, cwd] of [["link", "cmd/link", "", TINYGO_GOROOT, ROOT], ["go", "cmd/go", "cmd_go_bootstrap", TINYGO_GOROOT, ROOT], ["asm", "cmd/asm", "", asmGoroot, ROOT], ["gopls", ".", "", TINYGO_GOROOT, `${TOOLS}/gopls`]] as const) {
 	const output = `${out}/${name}.wasm`;
-	const args = ["build", "-target=wasip1", "-no-debug", `-ldflags=-X runtime.buildVersion=${lock.go.version}`, ...(tags ? [`-tags=${tags}`] : []), "-o", output, pkg];
+	const args = ["build", "-target=wasip1", "-no-debug", "-interp-timeout=30m", `-ldflags=-X runtime.buildVersion=${lock.go.version}`, ...(tags ? [`-tags=${tags}`] : []), "-o", output, pkg];
 	console.log(`tinygo ${args.join(" ")}`);
-	await $`${tinygo} ${args}`.cwd(ROOT).env(env);
+	await $`${tinygo} ${args}`.cwd(cwd).env({ ...env, GOROOT: goroot });
 	const entry = manifest.artifacts.find((a: { path: string }) => a.path === `${name}.wasm`);
 	if (!entry) throw new Error(`no manifest entry for ${name}.wasm`);
 	const bytes = readFileSync(output);

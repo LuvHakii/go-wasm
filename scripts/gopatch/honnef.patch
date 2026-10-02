@@ -1,0 +1,13 @@
+@@
+@@
+ func toMarkdown(s string) string {
+-	return strings.NewReplacer(`\'`, "`", `\"`, "`").Replace(s)
++	return strings.ReplaceAll(strings.ReplaceAll(s, `\'`, "`"), `\"`, "`")
+ }
+
+@@
+@@
+ func stripMarkdown(s string) string {
+-	return strings.NewReplacer(`\'`, "", `\"`, "'").Replace(s)
++	return strings.ReplaceAll(strings.ReplaceAll(s, `\'`, ""), `\"`, "'")
+ }
