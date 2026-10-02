@@ -1,0 +1,23 @@
+{
+	"compilerOptions": {
+		"target": "esnext",
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"types": [
+			"bun"
+		],
+		"lib": [
+			"esnext",
+			"dom"
+		],
+		"strict": true,
+		"skipLibCheck": true,
+		"noEmit": true,
+		"allowImportingTsExtensions": true
+	},
+	"include": [
+		"scripts/**/*.ts",
+		"test/**/*.ts",
+		"browser/**/*.ts"
+	]
+}

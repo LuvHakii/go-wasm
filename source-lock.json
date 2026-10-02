@@ -1,0 +1,19 @@
+{
+  "go": {
+    "version": "go1.27.1",
+    "revision": "862c888e612ac346c7c4d99c9392bdfd265f33b0",
+    "sha256": "4e408abae126d916b6164627193f2c54f0e3ca1312d693b86db45f862ab238b1",
+    "url": "https://go.dev/dl/go1.27.1.src.tar.gz"
+  },
+  "tools": {
+    "url": "https://github.com/golang/tools",
+    "rev": "134264d72fba423ca1ad358683cd3c32699b010e"
+  },
+  "tinygo": {
+    "repo": "tinygo-org/tinygo",
+    "commit": "7bcf6656fa321f86f892bfe8abb6a252f31d0282",
+    "artifact": 11201099691,
+    "sha256": "bf60d94b9f427945330cb7dae8dd9997904f45370b073f9c36f75fd11e2e6d68",
+    "expires": "2026-12-31"
+  }
+}

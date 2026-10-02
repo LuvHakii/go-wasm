@@ -1,0 +1,7 @@
+dist/
+dist-tinygo/
+.dist-stage-*
+.dist-previous
+node_modules
+*.log
+release/
