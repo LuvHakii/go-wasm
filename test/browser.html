@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Browser Go acceptance</title></head>
+<body>
+<h1>Browser Go acceptance</h1>
+<p>Checks asset integrity and real tool versions only. Other scopes cover runtime, LSP, and builds.</p>
+<pre id="result" role="status" aria-live="polite">Starting…</pre>
+<script type="module">
+window.__done = false;
+window.__result = null;
+const report = { ok: false, scope: new URLSearchParams(location.search).get('scope') ?? 'step1',
+	userAgent: navigator.userAgent, crossOriginIsolated, jspi: typeof WebAssembly.Suspending === 'function' && typeof WebAssembly.promising === 'function',
+	sharedMemory: typeof SharedArrayBuffer === 'function', artifacts: [], tools: [],
+	memory: { goHeap: null, peak: null, wholeBrowser: null, note: 'Linear capacity is not heap usage. Peak, Go heap and whole-browser memory are unavailable in this step1 host.' } };
+try {
+	if (report.scope !== 'step1') throw new Error('Unknown acceptance scope');
+	if (!report.jspi && !(crossOriginIsolated && report.sharedMemory)) throw new Error('This browser requires JSPI or cross-origin-isolated shared memory.');
+	if (!crossOriginIsolated) throw new Error('Acceptance requires COOP same-origin and COEP require-corp');
+	const [manifestResponse, lockResponse] = await Promise.all([fetch('/dist/tool-manifest.json'), fetch('/source-lock.json')]);
+	if (!manifestResponse.ok || !lockResponse.ok) throw new Error('Cannot load manifest/source lock');
+	const manifest = await manifestResponse.json(), lock = await lockResponse.json();
+	if (!lock?.go || typeof lock.go.version !== 'string' || typeof lock.go.revision !== 'string' || typeof lock.go.sha256 !== 'string') throw new Error('Invalid source lock');
+	if (manifest?.schemaVersion !== 1 || manifest.goVersion !== lock.go.version || manifest.goSourceRevision !== lock.go.revision
+		|| manifest.goSourceSha256 !== lock.go.sha256 || manifest.provenance?.toolsRevision !== lock.tools.rev) throw new Error('Manifest provenance does not match source lock');
+	const settings = manifest.buildSettings;
+	if (settings?.GOOS !== 'wasip1' || settings.GOARCH !== 'wasm' || settings.CGO_ENABLED !== '0' || settings.GOEXPERIMENT !== '' || settings.ldflags !== '-s -w') throw new Error('Unexpected build settings');
+	if (!Array.isArray(manifest.artifacts)) throw new Error('Invalid artifacts list');
+	const required = { 'go.wasm': 'tool', 'compile.wasm': 'tool', 'link.wasm': 'tool', 'gopls.wasm': 'tool', 'goroot.tar': 'goroot', 'std-cache.tar': 'std-cache' };
+	const seen = new Set();
+	for (const artifact of manifest.artifacts) {
+		if (!artifact || typeof artifact.path !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*\.(wasm|tar)$/.test(artifact.path)
+			|| !['tool', 'goroot', 'std-cache'].includes(artifact.kind) || !/^[0-9a-f]{64}$/.test(artifact.sha256)
+			|| !Number.isSafeInteger(artifact.size) || artifact.size <= 0 || seen.has(artifact.path)) throw new Error('Invalid/duplicate manifest artifact');
+		seen.add(artifact.path);
+		if (Object.hasOwn(required, artifact.path) && required[artifact.path] !== artifact.kind) throw new Error('Wrong artifact kind: ' + artifact.path);
+		const loadStart = performance.now();
+		const response = await fetch('/dist/' + artifact.path);
+		if (!response.ok) throw new Error('Asset fetch failed: ' + artifact.path);
+		const bytes = await response.arrayBuffer();
+		const loadMs = performance.now() - loadStart;
+		const hashStart = performance.now();
+		const digest = await crypto.subtle.digest('SHA-256', bytes);
+		const sha256 = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+		const hashMs = performance.now() - hashStart;
+		if (bytes.byteLength !== artifact.size || sha256 !== artifact.sha256) throw new Error('Asset integrity mismatch: ' + artifact.path);
+		report.artifacts.push({ path: artifact.path, size: bytes.byteLength, sha256, loadMs, hashMs });
+		if (artifact.kind !== 'tool') continue;
+		const tool = artifact.path.replace(/\.wasm$/, '');
+		if (!['go', 'compile', 'link', 'asm', 'gopls'].includes(tool)) throw new Error('No version invocation defined for tool: ' + tool);
+		const worker = new Worker('/version-worker.js', { type: 'module' });
+		let result;
+		try {
+			result = await new Promise((resolve, reject) => {
+				const timer = setTimeout(() => reject(new Error('Tool timed out: ' + tool + '; host polling/scheduler integration may be required')), 120000);
+				worker.onmessage = event => { clearTimeout(timer); resolve(event.data); };
+				worker.onerror = event => { clearTimeout(timer); reject(new Error(event.message)); };
+				worker.postMessage({ tool, bytes }, [bytes]);
+			});
+		} finally { worker.terminate(); }
+		if (result?.ok !== true) throw new Error(tool + ': ' + (result?.error ?? 'Invalid worker result'));
+		report.tools.push(result);
+		if (result.exitCode !== 0 || typeof result.stdout !== 'string' || result.stderr !== '') throw new Error(tool + ' version failed: ' + JSON.stringify(result));
+		if (tool === 'gopls') {
+			if (typeof manifest.toolVersions?.gopls !== 'string') throw new Error('Manifest missing gopls version expectation');
+			if (!result.stdout.trim().startsWith('golang.org/x/tools/gopls ')) throw new Error('gopls: expected golang.org/x/tools/gopls <version>, got ' + result.stdout.trim());
+		} else {
+			const expected = tool === 'go' ? `go version ${manifest.goVersion} wasip1/wasm` : `${tool} version ${manifest.goVersion}`;
+			if (result.stdout.trim() !== expected) throw new Error(tool + ': expected ' + expected + ', got ' + result.stdout.trim());
+		}
+	}
+	for (const path of Object.keys(required)) if (!seen.has(path)) throw new Error('Missing required artifact: ' + path);
+	report.ok = true;
+} catch (error) { report.error = error instanceof Error ? error.message : String(error); }
+window.__result = report;
+window.__done = true;
+document.getElementById('result').textContent = JSON.stringify(report, null, 2);
+</script>
+</body>
+</html>
