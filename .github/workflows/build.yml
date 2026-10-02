@@ -76,9 +76,6 @@ jobs:
           cp dist/*.wasm dist/*.tar dist/tool-manifest.json release/
           cp dist-tinygo/link.wasm release/link.tinygo.wasm
           cp dist-tinygo/tool-manifest.json release/tool-manifest.tinygo.json
-          printf '{"go":"%s","toolsRev":"%s","tinygoCommit":"%s","patches":[%s]}' \
-            "$GO_VERSION" "$TOOLS_REV" "$TINYGO_COMMIT" \
-            "$(ls patches | sed 's/.*/"&"/' | paste -sd, -)" > release/versions.json
           ls -la release/
 
       - name: upload dry run
