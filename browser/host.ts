@@ -57,6 +57,7 @@ export class BrowserHost {
 	private instance: WebAssembly.Instance | undefined;
 	private baseline = new Map<string, Uint8Array>();
 	private closed = false;
+	private exiting = false;
 	constructor(readonly options: { argv: string[]; env: string[]; files: SavedFile[]; directories?: string[]; mode: 'jspi' | 'mailbox'; mailbox?: SharedArrayBuffer; serializedWrites?: boolean; emit: (event: HostRequest) => void }) {
 		if (options.mode === 'mailbox') {
 			if (!options.mailbox) throw new Error('Missing mailbox');
@@ -158,6 +159,13 @@ export class BrowserHost {
 			for (const input of this.inputs.values()) input.finished = true;
 		} else if (raw.kind === 'lsp' && 'json' in raw && typeof raw.json === 'string') {
 			this.input.append(new TextEncoder().encode(raw.json + '\n'));
+			if (raw.json.includes('"shutdown"')) {
+				const request = JSON.parse(raw.json);
+				if (request.method === 'shutdown' && request.id !== undefined) {
+					this.options.emit({ kind: 'lsp', json: JSON.stringify({ jsonrpc: '2.0', id: request.id, result: null }) });
+					this.exiting = true;
+				}
+			}
 		} else if (raw.kind === 'files' && 'files' in raw && Array.isArray(raw.files)) {
 			this.applyFileChanges(raw.files);
 		} else if (raw.kind === 'result' && 'fd' in raw && typeof raw.fd === 'number' && 'stdout' in raw && typeof raw.stdout === 'string' && 'stderr' in raw && typeof raw.stderr === 'string' && 'exitCode' in raw && typeof raw.exitCode === 'number' && 'files' in raw && Array.isArray(raw.files)) {
@@ -191,6 +199,7 @@ export class BrowserHost {
 			}
 		}
 		view.setUint32(nevents, ready, true);
+		if (this.exiting) throw Object.assign(new Error('shutdown'), { code: 0 });
 		return { ready, wait };
 	}
 	private pollSync(input: number, output: number, count: number, nevents: number): number {
