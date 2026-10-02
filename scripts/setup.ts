@@ -1,7 +1,7 @@
 import { $ } from "bun";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
-import { checkRoot, GO, goEnv, lock, NATIVE_GO, patches, REPO, ROOT, TOOLS } from "./common.ts";
+import { cpSync, existsSync, mkdirSync } from "node:fs";
+import { checkRoot, GO, goEnv, lock, NATIVE_GO, REPO, ROOT, TOOLS } from "./common.ts";
 
 checkRoot();
 const { version, revision, sha256, url } = lock.go;
@@ -26,9 +26,11 @@ if (!existsSync(`${TOOLS}/.git`)) {
 }
 await $`git -C ${TOOLS} fetch -q --depth 1 origin ${lock.tools.rev}`;
 await $`git -C ${TOOLS} checkout -q --force FETCH_HEAD`;
-await patches(TOOLS, ["tools-browser.patch"]);
+await $`git -C ${TOOLS} clean -fdq`;
 
 for (const dir of [TOOLS, `${TOOLS}/gopls`, `${REPO}/scripts/trim`]) await $`${NATIVE_GO} mod download`.cwd(dir).env(env);
+await $`${NATIVE_GO} run . -tools ${TOOLS}`.cwd(`${REPO}/scripts/trim`).env(env);
+cpSync(`${REPO}/scripts/overlay-tools`, TOOLS, { recursive: true });
 await $`${NATIVE_GO} install github.com/uber-go/gopatch@v0.4.0`.env({ ...env, GOBIN: `${ROOT}/bin` });
 await Bun.write(`${ROOT}/source.json`, JSON.stringify({ version, revision, sha256, bootstrap, builtVersion, toolsRev: lock.tools.rev }, null, 2) + "\n");
 console.log(JSON.stringify({ root: ROOT, version, revision, sha256, builtVersion, toolsRev: lock.tools.rev }));

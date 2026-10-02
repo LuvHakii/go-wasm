@@ -67,7 +67,8 @@ try {
 	const patches: { path: string; sha256: string; target: "go" }[] = [];
 	const gopatchFiles = [...new Bun.Glob("*.patch").scanSync({ cwd: `${repo}/scripts/gopatch` })].sort().map(p => `scripts/gopatch/${p}`);
 	const patchFiles = [...new Bun.Glob("*.patch").scanSync({ cwd: `${repo}/patches` })].sort().map(p => `patches/${p}`);
-	for (const path of ["scripts/trim/main.go", ...patchFiles, ...gopatchFiles, ...[...new Bun.Glob("**/*.go").scanSync({ cwd: `${repo}/scripts/overlay` })].sort().map(p => `scripts/overlay/${p}`)]) {
+	const goFiles = (dir: string) => [...new Bun.Glob("**/*.go").scanSync({ cwd: `${repo}/${dir}` })].sort().map(p => `${dir}/${p}`);
+	for (const path of [...goFiles("scripts/trim"), ...patchFiles, ...gopatchFiles, ...goFiles("scripts/overlay"), ...goFiles("scripts/overlay-tools")]) {
 		patches.push({ path, sha256: await hash(`${repo}/${path}`), target: "go" });
 	}
 

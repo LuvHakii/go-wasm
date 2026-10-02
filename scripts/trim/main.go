@@ -86,12 +86,16 @@ var remove = []string{"cmd/go/internal/lockedfile/internal/filelock/filelock_oth
 
 func main() {
 	args := os.Args[1:]
+	if len(args) == 2 && args[0] == "-tools" {
+		runTools(args[1])
+		return
+	}
 	stubObj := len(args) > 0 && args[0] == "-stubobj"
 	if stubObj {
 		args = args[1:]
 	}
 	if len(args) != 1 {
-		log.Fatal("usage: trim [-stubobj] GOROOT_COPY")
+		log.Fatal("usage: trim [-stubobj] GOROOT_COPY | trim -tools TOOLS_CHECKOUT")
 	}
 	src := filepath.Join(args[0], "src")
 	if stubObj {
@@ -139,9 +143,13 @@ func rewrite(file string, edits []edit) {
 }
 
 func findFunc(f *ast.File, name string) []*ast.FuncDecl {
+	recv, name := "", name
+	if i := strings.Index(name, "."); i >= 0 {
+		recv, name = name[:i], name[i+1:]
+	}
 	var out []*ast.FuncDecl
 	for _, d := range f.Decls {
-		if fd, ok := d.(*ast.FuncDecl); ok && fd.Name.Name == name && fd.Body != nil {
+		if fd, ok := d.(*ast.FuncDecl); ok && fd.Name.Name == name && fd.Body != nil && recvName(fd) == recv {
 			out = append(out, fd)
 		}
 	}
@@ -283,10 +291,9 @@ func replaceBody(fn, src string, imports ...string) edit {
 		body := stub.Decls[0].(*ast.FuncDecl).Body.List
 		n := 0
 		for _, fd := range findFunc(f, fn) {
-			if fd.Recv == nil {
-				fd.Body.List = body
-				n++
-			}
+			dropComments(f, fd.Body.Lbrace, fd.Body.Rbrace)
+			fd.Body.List = body
+			n++
 		}
 		if n == 0 {
 			return fmt.Errorf("func %s not found", fn)

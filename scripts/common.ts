@@ -30,17 +30,6 @@ export async function hash(path: string) {
 	return digest.digest("hex");
 }
 
-export async function patches(dir: string, files: string[]) {
-	await $`git -C ${dir} checkout -- .`;
-	await $`git -C ${dir} clean -fdq`;
-	for (const file of files) {
-		const out = await $`git -C ${dir} apply -v ${REPO}/patches/${file}`.quiet().nothrow();
-		const text = out.stdout.toString() + out.stderr.toString();
-		if (out.exitCode !== 0 || text.includes("offset")) throw new Error(`patch ${file} does not apply cleanly\n${text}`);
-		console.log(`patch ${file}`);
-	}
-}
-
 export function goEnv(extra: Record<string, string> = {}) {
 	return {
 		...process.env,

@@ -2,12 +2,12 @@
 
 Runs `gopls`, `go`, `compile`, `link`, `asm` and the programs they build in browser WebAssembly. No native backend.
 
-The repo ships no upstream code. It holds patches, scripts and a workflow. `scripts/setup.ts` downloads the pinned Go source, clones the pinned `golang/tools`, and applies `patches/tools-browser.patch`. `scripts/build.ts` edits the Go source and builds `dist/`.
+The repo ships no upstream code. It holds a codemod, overlay files, patches, scripts and a workflow. `scripts/setup.ts` downloads the pinned Go source, clones the pinned `golang/tools`, and runs the codemod and overlay over it. `scripts/build.ts` edits the Go source and builds `dist/`.
 
 ## Commands
 
 ```
-bun scripts/setup.ts            # pinned Go source + native bootstrap, golang/tools clone + patch, modules, gopatch (ROOT=~/go-wasm-build)
+bun scripts/setup.ts            # pinned Go source + native bootstrap, golang/tools clone + codemod + overlay, modules, gopatch (ROOT=~/go-wasm-build)
 bun scripts/build.ts            # edits the Go source, builds dist/
 bun scripts/build-tinygo.ts     # link built with TinyGo, into dist-tinygo/
 bun test/browser.ts ./dist      # Chromium acceptance, all scopes
@@ -30,8 +30,8 @@ Pins are in `source-lock.json`: Go, `golang/tools`, and the TinyGo CI artifact.
 
 ## Caveats
 
-- `patches/tools-browser.patch`: gopls and the shared packages target wasip1 only. Deletes the debug server, web UI, assembly view, govulncheck, telemetry upload and the `runtime/pprof` profile command, each replaced by a small stub. Staticcheck keeps every analyzer except `SA1008`, which imports `net/http`. `go` runs through `internal/browserhost` instead of `os/exec`. The cache key uses the module hash from the host.
-- `scripts/trim`: a `go/ast` codemod over the Go source. Rules are anchored by name, not line, so a Go bump either applies or stops with the rule to update. It keeps only the `wasm` backend in compile, link and asm, drops `go` commands that cannot run, swaps `runtime/pprof` for a stub, and stubs version-control access, host-object loaders and the ELF/Mach-O build-ID readers.
+- `scripts/trim -tools` and `scripts/overlay-tools/`: gopls and the shared packages target wasip1 only. The codemod deletes the debug server, assembly view, govulncheck, telemetry prompt and web UI by file and declaration name, and the overlay supplies small stubs in their place, plus `internal/browserhost` (`go` runs through it instead of `os/exec`), the whole-message LSP transport and the browser `gopls/main.go`. Staticcheck keeps every analyzer except `SA1008`, which imports `net/http`: the codemod drops that entry and derives the analyzer list from the config table. Every rule is anchored by name, so a `golang/tools` bump either applies or stops with the rule to update. No plain patch is needed.
+- `scripts/trim`: a `go/ast` codemod, over the Go source and, with `-tools`, over `golang/tools`. Rules are anchored by name, not line, so a Go bump either applies or stops with the rule to update. It keeps only the `wasm` backend in compile, link and asm, drops `go` commands that cannot run, swaps `runtime/pprof` for a stub, and stubs version-control access, host-object loaders and the ELF/Mach-O build-ID readers.
 - `scripts/gopatch/*.patch`: three insertions at function starts, applied with `gopatch`. gopatch silently does nothing when a pattern misses, so `build.ts` checks each target gained its browser call.
 - `scripts/overlay/`: new files only, copied into the Go tree.
 - `go.wasm` builds with `-tags cmd_go_bootstrap`, which stubs `net/http`, vcs and auth.
