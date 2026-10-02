@@ -7,6 +7,10 @@ on:
         description: "Publish release <yyyymmdd-hhmm> UTC. Off = dry run, artifact only, 7 days."
         type: boolean
         default: false
+      probe_compile:
+        description: "After the build, try cmd/compile with TinyGo (non-gating; reports time, peak memory, size)."
+        type: boolean
+        default: false
 
 concurrency:
   group: build-${{ github.ref }}
@@ -21,7 +25,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 340
     steps:
       - uses: actions/checkout@v4
 
@@ -100,3 +104,9 @@ jobs:
             --title "${GITHUB_SHA::7}" \
             --notes "$NOTES" \
           || gh release upload "$TAG" release/* --clobber
+
+      - name: probe compile with TinyGo
+        if: inputs.probe_compile
+        continue-on-error: true
+        timeout-minutes: 240
+        run: bun scripts/probe-compile.ts
