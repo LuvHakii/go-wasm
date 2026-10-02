@@ -173,6 +173,20 @@ async function run(mode: 'jspi' | 'mailbox') {
 			const stats = await wait('stats');
 			if (!Array.isArray(stats.modules) || stats.modules.includes('asm') || !stats.modules.includes('compile')) throw new Error(`asm.wasm loaded unnecessarily: ${JSON.stringify(stats)}`);
 			replies.push({ kind: 'lazy-proof', modules: stats.modules });
+
+			worker.postMessage({ kind: 'files', files: [
+				{ path: '/workspace/asmpkg/main.go', bytes: encode('package main\nimport "os"\nfunc f()\nfunc main() { f(); os.Stdout.WriteString("asm ok\\n") }\n') },
+				{ path: '/workspace/asmpkg/f.s', bytes: encode(`// ${crypto.randomUUID()}\n#include "textflag.h"\n\nTEXT ·f(SB),NOSPLIT,$0-0\n\tRET\n`) },
+			] });
+			await wait('saved');
+			await command(['build', '-o', '/workspace/asmpkg.wasm', './asmpkg']);
+			worker.postMessage({ kind: 'run', requestId: ++requestId, path: '/workspace/asmpkg.wasm' });
+			const assembled = await wait('result', requestId);
+			if (assembled.exitCode !== 0 || assembled.stdout !== 'asm ok\n') throw new Error(`Assembly package build wrong: ${JSON.stringify(assembled)}`);
+			worker.postMessage({ kind: 'stats' });
+			const afterAsm = await wait('stats');
+			if (!Array.isArray(afterAsm.modules) || !afterAsm.modules.includes('asm')) throw new Error(`asm.wasm not used for a .s package: ${JSON.stringify(afterAsm)}`);
+			replies.push({ kind: 'asm-proof', output: assembled.stdout });
 		}
 		if (new URLSearchParams(location.search).get('scope') === 'capabilities') {
 			const encode = (text: string) => new TextEncoder().encode(text);
