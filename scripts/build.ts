@@ -59,8 +59,8 @@ try {
 	cpSync(`${repo}/scripts/overlay`, source, { recursive: true });
 	cpSync(`${tools}/internal/browserhost`, `${source}/src/internal/browserhost`, { recursive: true });
 	const patches: { path: string; sha256: string; target: "go" }[] = [];
-	const gopatchFiles = [...new Bun.Glob("*.patch").scanSync({ cwd: `${repo}/scripts/gopatch` })].sort().map(p => `scripts/gopatch/${p}`);
-	const patchFiles = [...new Bun.Glob("*.patch").scanSync({ cwd: `${repo}/patches` })].sort().map(p => `patches/${p}`);
+	const gopatchFiles = ["scripts/gopatch/browser.patch"];
+	const patchFiles = [...new Bun.Glob("*.patch").scanSync({ cwd: `${repo}/patches` })].sort().filter(p => !p.startsWith("tinygo-")).map(p => `patches/${p}`);
 	const goFiles = (dir: string) => [...new Bun.Glob("**/*.go").scanSync({ cwd: `${repo}/${dir}` })].sort().map(p => `${dir}/${p}`);
 	for (const path of [...goFiles("scripts/trim"), ...patchFiles, ...gopatchFiles, ...goFiles("scripts/overlay"), ...goFiles("scripts/overlay-tools")]) {
 		patches.push({ path, sha256: await hash(`${repo}/${path}`), target: "go" });

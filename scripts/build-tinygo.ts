@@ -35,6 +35,17 @@ cpSync(SOURCE, TINYGO_GOROOT, { recursive: true });
 mkdirSync(`${TINYGO_GOROOT}/bin`, { recursive: true });
 cpSync(NATIVE_GO, `${TINYGO_GOROOT}/bin/go`);
 
+cpSync(`${REPO}/scripts/overlay-tinygo`, TINYGO_GOROOT, { recursive: true });
+const callMarkers: [string, string][] = [
+	["text/template/exec.go", "evalCallSig"], ["text/template/funcs.go", "addValueFuncsSig"], ["cmd/go/internal/list/list.go", "template.Fn0"],
+	["cmd/compile/internal/ssagen/ssa.go", "new(ssa.Cache)"],
+];
+for (const [target, marker] of callMarkers) {
+	const file = `${TINYGO_GOROOT}/src/${target}`;
+	await $`${ROOT}/bin/gopatch -p ${REPO}/scripts/gopatch/tinygo.patch ${file}`;
+	if (!(await Bun.file(file).text()).includes(marker)) throw new Error(`gopatch tinygo.patch did not apply to ${target}; update scripts/gopatch/tinygo.patch for this Go version`);
+}
+
 const dist = `${REPO}/dist`;
 const out = `${REPO}/dist-tinygo`;
 rmSync(out, { recursive: true, force: true });
@@ -47,9 +58,9 @@ const env = goEnv({
 const manifestPath = `${out}/tool-manifest.json`;
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const built: { path: string; size: number }[] = [];
-for (const [name, pkg] of [["link", "cmd/link"]] as const) {
+for (const [name, pkg, tags] of [["link", "cmd/link", ""], ["go", "cmd/go", "cmd_go_bootstrap"]] as const) {
 	const output = `${out}/${name}.wasm`;
-	const args = ["build", "-target=wasip1", "-no-debug", "-o", output, pkg];
+	const args = ["build", "-target=wasip1", "-no-debug", `-ldflags=-X runtime.buildVersion=${lock.go.version}`, ...(tags ? [`-tags=${tags}`] : []), "-o", output, pkg];
 	console.log(`tinygo ${args.join(" ")}`);
 	await $`${tinygo} ${args}`.cwd(ROOT).env(env);
 	const entry = manifest.artifacts.find((a: { path: string }) => a.path === `${name}.wasm`);
@@ -59,6 +70,9 @@ for (const [name, pkg] of [["link", "cmd/link"]] as const) {
 	entry.size = bytes.length;
 	built.push({ path: `${name}.wasm`, size: bytes.length });
 }
-manifest.provenance.tinygo = { commit: lock.tinygo.commit, artifact: lock.tinygo.artifact, patches: patchFiles, tools: built.map(b => b.path) };
+const tinygoFiles = [...patchFiles.map(p => `patches/${p}`), "scripts/gopatch/tinygo.patch", ...[...new Bun.Glob("**/*.go").scanSync({ cwd: `${REPO}/scripts/overlay-tinygo` })].sort().map(p => `scripts/overlay-tinygo/${p}`)];
+const tinygoHashes: { path: string; sha256: string }[] = [];
+for (const path of tinygoFiles) tinygoHashes.push({ path, sha256: await hash(`${REPO}/${path}`) });
+manifest.provenance.tinygo = { commit: lock.tinygo.commit, artifact: lock.tinygo.artifact, files: tinygoHashes, tools: built.map(b => b.path) };
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
 console.log(JSON.stringify({ out, built }));
