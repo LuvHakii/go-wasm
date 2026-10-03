@@ -58,14 +58,16 @@ const env = goEnv({
 const manifestPath = `${out}/tool-manifest.json`;
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const built: { path: string; size: number }[] = [];
-for (const [name, pkg, tags, goroot, cwd, flags] of [["link", "cmd/link", "", TINYGO_GOROOT, ROOT, []], ["go", "cmd/go", "cmd_go_bootstrap", TINYGO_GOROOT, ROOT, []], ["asm", "cmd/asm", "", asmGoroot, ROOT, []], ["gopls", ".", "", TINYGO_GOROOT, `${TOOLS}/gopls`, ["-stack-size=512KB"]]] as const) {
-	const output = `${out}/${name}.wasm`;
-	const args = ["build", "-target=wasip1", "-no-debug", "-interp-timeout=30m", ...flags, `-ldflags=-X runtime.buildVersion=${version}`, ...(tags ? [`-tags=${tags}`] : []), "-o", output, pkg];
+const specs = [["link", "cmd/link", "", TINYGO_GOROOT, ROOT, []], ["go", "cmd/go", "cmd_go_bootstrap", TINYGO_GOROOT, ROOT, []], ["asm", "cmd/asm", "", asmGoroot, ROOT, []], ["gopls", ".", "", TINYGO_GOROOT, `${TOOLS}/gopls`, ["-stack-size=512KB"]]] as const;
+await Promise.all(specs.map(async ([name, pkg, tags, goroot, cwd, flags]) => {
+	const args = ["build", "-target=wasip1", "-no-debug", "-interp-timeout=30m", ...flags, `-ldflags=-X runtime.buildVersion=${version}`, ...(tags ? [`-tags=${tags}`] : []), "-o", `${out}/${name}.wasm`, pkg];
 	console.log(`tinygo ${args.join(" ")}`);
 	await $`${tinygo} ${args}`.cwd(cwd).env({ ...env, GOROOT: goroot });
+}));
+for (const [name] of specs) {
 	const entry = manifest.artifacts.find((a: { path: string }) => a.path === `${name}.wasm`);
 	if (!entry) throw new Error(`no manifest entry for ${name}.wasm`);
-	const bytes = readFileSync(output);
+	const bytes = readFileSync(`${out}/${name}.wasm`);
 	entry.sha256 = createHash("sha256").update(bytes).digest("hex");
 	entry.size = bytes.length;
 	built.push({ path: `${name}.wasm`, size: bytes.length });
