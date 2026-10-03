@@ -1,6 +1,6 @@
-import { cpSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { $ } from 'bun';
-import { pin } from '../scripts/common.ts';
+import { NATIVE_GO, pin, TOOLS } from '../scripts/common.ts';
 import { homedir } from 'node:os';
 import { resolve, sep } from 'node:path';
 import { realpath } from 'node:fs/promises';
@@ -62,10 +62,11 @@ if (!workerBundle) throw new Error('Version worker bundle missing');
 routes['/version-worker.js'] = workerBundle;
 if (scope === 'bridge') {
 	const root = resolve(process.env.ROOT ?? `${homedir()}/go-wasm-build`);
-	const bridge = `${root}/tools/go-wasm-bridge`;
+	const bridge = `${TOOLS}/go-wasm-bridge`;
 	mkdirSync(bridge, { recursive: true });
 	cpSync(resolve(import.meta.dir, 'bridge/main.go'), `${bridge}/main.go`);
-	await $`${root}/go/bin/go build -buildvcs=false -o ${root}/bridge.wasm ./go-wasm-bridge`.cwd(`${root}/tools`).env({ ...process.env, GOOS: 'wasip1', GOARCH: 'wasm', GOEXPERIMENT: '', GOROOT: `${root}/tool-source`, GOTELEMETRY: 'off' });
+	try { await $`${NATIVE_GO} build -buildvcs=false -o ${root}/bridge.wasm ./go-wasm-bridge`.cwd(TOOLS).env({ ...process.env, GOOS: 'wasip1', GOARCH: 'wasm', GOEXPERIMENT: '', GOROOT: `${root}/tool-source`, GOTELEMETRY: 'off' }); }
+	finally { rmSync(bridge, { recursive: true, force: true }); }
 	routes['/bridge.wasm'] = Bun.file(`${root}/bridge.wasm`);
 	for (const name of ['bridge-worker', 'bridge-page']) {
 		const built = await Bun.build({ entrypoints: [resolve(import.meta.dir, `${name}.ts`)], target: 'browser', format: 'esm' });
