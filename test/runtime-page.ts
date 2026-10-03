@@ -245,6 +245,10 @@ func main() {
 	_, err = os.Executable(); report("os.Executable", err)
 	_, err = user.Current(); report("os/user", err)
 	c := make(chan os.Signal, 1); signal.Notify(c, syscall.SIGINT); report("signal.Notify", nil)
+	wd, err := os.Getwd(); report("os.Getwd", err); fmt.Println("getwd:", wd)
+	report("relative write", os.WriteFile("cwdprobe.tmp", []byte("x"), 0o644))
+	_, err = os.Stat("/workspace/cwdprobe.tmp"); report("relative resolves to cwd", err)
+	os.Remove("cwdprobe.tmp")
 	fmt.Println("GOMAXPROCS", runtime.GOMAXPROCS(0), "NumCPU", runtime.NumCPU())
 }
 `) },
@@ -273,6 +277,8 @@ func main() {
 			for (const name of ['net.Dial', 'os/exec', 'os.Pipe', 'os.Chown', 'os.Executable']) {
 				if (!String(probes[name]).startsWith('FAIL')) throw new Error(`${name} unexpectedly works on wasip1: ${probes[name]}`);
 			}
+			if (probes['getwd'] !== '/workspace') throw new Error(`Working directory is not /workspace: ${probes['getwd']}`);
+			for (const name of ['relative write', 'relative resolves to cwd']) if (probes[name] !== 'ok') throw new Error(`${name} failed: ${probes[name]}`);
 			if (probes['loopback read'] !== 'hi') throw new Error(`In-process loopback socket failed: ${JSON.stringify(probes)}`);
 			if (probes['GOMAXPROCS'] !== 'GOMAXPROCS 1 NumCPU 1') throw new Error(`Expected a single CPU: ${probes['GOMAXPROCS']}`);
 			if (String(js.stdout).trim() !== 'fetch: probe-ok') throw new Error(`js/wasm fetch failed: ${JSON.stringify(js)}`);
