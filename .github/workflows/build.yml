@@ -44,9 +44,15 @@ jobs:
           path: |
             go/bin
             go/pkg
+            go/src/cmd/cgo/zdefaultcc.go
+            go/src/cmd/go/internal/cfg/zdefaultcc.go
+            go/src/cmd/internal/objabi/zbootstrap.go
+            go/src/internal/buildcfg/zbootstrap.go
+            go/src/internal/runtime/sys/zversion.go
+            go/src/time/tzdata/zzipdata.go
             ${{ env.ROOT }}/downloads
             ${{ env.ROOT }}/module-cache
-          key: go-${{ env.GO_REVISION }}-${{ hashFiles('scripts/setup.ts', 'scripts/common.ts') }}
+          key: go-generated-${{ env.GO_REVISION }}-${{ hashFiles('scripts/setup.ts', 'scripts/common.ts') }}
 
       - name: install deps
         run: |
