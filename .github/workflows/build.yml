@@ -7,10 +7,6 @@ on:
         description: "Publish release <yyyymmdd-hhmm> UTC. Off = dry run, artifact only, 7 days."
         type: boolean
         default: false
-      probe_compile:
-        description: "After the build, try cmd/compile with TinyGo (non-gating; reports time, peak memory, size)."
-        type: boolean
-        default: false
 
 concurrency:
   group: build-${{ github.ref }}
@@ -81,7 +77,7 @@ jobs:
         run: |
           mkdir -p release
           cp dist/*.wasm dist/*.tar dist/tool-manifest.json release/
-          tar -cf release/tinygo.tar -C dist-tinygo link.wasm go.wasm asm.wasm gopls.wasm tool-manifest.json
+          tar -cf release/tinygo.tar -C dist-tinygo link.wasm go.wasm asm.wasm gopls.wasm compile.wasm tool-manifest.json
           bun scripts/common.ts --json > release/versions.json
           ls -la release/
 
@@ -107,9 +103,3 @@ jobs:
             --title "${GITHUB_SHA::7}" \
             --notes "$NOTES" \
           || gh release upload "$TAG" release/* --clobber
-
-      - name: probe compile with TinyGo
-        if: inputs.probe_compile
-        continue-on-error: true
-        timeout-minutes: 240
-        run: bun scripts/probe-compile.ts

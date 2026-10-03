@@ -39,6 +39,7 @@ cpSync(NATIVE_GO, `${TINYGO_GOROOT}/bin/go`);
 cpSync(`${REPO}/scripts/overlay-tinygo`, TINYGO_GOROOT, { recursive: true });
 await applyRules(TINYGO_GOROOT, "go-tinygo-template-calls.yml");
 await applyRules(TINYGO_GOROOT, "go-tinygo-ssa-cache.yml");
+await $`${NATIVE_GO} run . -tinygo ${TINYGO_GOROOT}`.cwd(`${REPO}/scripts/trim`).env(goEnv({ GOROOT: GO }));
 
 const asmGoroot = `${ROOT}/tinygo-goroot-asm`;
 rmSync(asmGoroot, { recursive: true, force: true });
@@ -58,7 +59,7 @@ const env = goEnv({
 const manifestPath = `${out}/tool-manifest.json`;
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const built: { path: string; size: number }[] = [];
-const specs = [["link", "cmd/link", "", TINYGO_GOROOT, ROOT, []], ["go", "cmd/go", "cmd_go_bootstrap", TINYGO_GOROOT, ROOT, []], ["asm", "cmd/asm", "", asmGoroot, ROOT, []], ["gopls", ".", "", TINYGO_GOROOT, `${TOOLS}/gopls`, ["-stack-size=512KB"]]] as const;
+const specs = [["link", "cmd/link", "", TINYGO_GOROOT, ROOT, []], ["go", "cmd/go", "cmd_go_bootstrap", TINYGO_GOROOT, ROOT, []], ["asm", "cmd/asm", "", asmGoroot, ROOT, []], ["gopls", ".", "", TINYGO_GOROOT, `${TOOLS}/gopls`, ["-stack-size=512KB"]], ["compile", "cmd/compile", "", TINYGO_GOROOT, ROOT, ["-opt=1", "-gc=leaking", "-stack-size=512KB"]]] as const;
 await Promise.all(specs.map(async ([name, pkg, tags, goroot, cwd, flags]) => {
 	const args = ["build", "-target=wasip1", "-no-debug", "-interp-timeout=30m", ...flags, `-ldflags=-X runtime.buildVersion=${version}`, ...(tags ? [`-tags=${tags}`] : []), "-o", `${out}/${name}.wasm`, pkg];
 	console.log(`tinygo ${args.join(" ")}`);
@@ -73,7 +74,7 @@ for (const [name] of specs) {
 	built.push({ path: `${name}.wasm`, size: bytes.length });
 }
 const overlays = (dir: string) => [...new Bun.Glob("**/*.go").scanSync({ cwd: `${REPO}/${dir}` })].sort().map(path => `${dir}/${path}`);
-const tinygoFiles = ["patches/tinygo-wasip1.yml", "patches/go-tinygo-template-calls.yml", "patches/go-tinygo-ssa-cache.yml", ...overlays("scripts/overlay-tinygo"), ...overlays("scripts/overlay-tinygo-src")];
+const tinygoFiles = ["patches/tinygo-wasip1.yml", "patches/go-tinygo-template-calls.yml", "patches/go-tinygo-ssa-cache.yml", ...overlays("scripts/trim"), ...overlays("scripts/overlay-tinygo"), ...overlays("scripts/overlay-tinygo-src")];
 const tinygoHashes: { path: string; sha256: string }[] = [];
 for (const path of tinygoFiles) tinygoHashes.push({ path, sha256: await hash(`${REPO}/${path}`) });
 manifest.provenance.tinygo = { commit, files: tinygoHashes, tools: built.map(b => b.path) };
