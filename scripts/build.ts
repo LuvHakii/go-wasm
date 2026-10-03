@@ -30,6 +30,7 @@ try {
 	await $`git -C ${GO} archive --format=tar HEAD | tar -x -C ${source}`;
 	await Bun.write(`${source}/VERSION`, `${version}\n`);
 	cpSync(`${GO}/pkg/tool`, `${source}/pkg/tool`, { recursive: true });
+	cpSync(`${GO}/pkg/include`, `${source}/pkg/include`, { recursive: true });
 	const generatedSources = [
 		"src/cmd/cgo/zdefaultcc.go", "src/cmd/go/internal/cfg/zdefaultcc.go", "src/cmd/internal/objabi/zbootstrap.go",
 		"src/internal/buildcfg/zbootstrap.go", "src/internal/runtime/sys/zversion.go", "src/time/tzdata/zzipdata.go",
