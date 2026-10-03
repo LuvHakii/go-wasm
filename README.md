@@ -9,7 +9,8 @@ The repo ships no upstream code. It pins `go/` (golang/go at a release tag) and 
 ```
 bun scripts/setup.ts            # submodules, native Go bootstrap in go/, golang/tools codemod + overlay, staticcheck copy (ROOT=~/go-wasm-build)
 bun scripts/build.ts            # edits the Go source, builds dist/
-bun scripts/build-tinygo.ts     # link, go, asm, gopls and compile built with TinyGo, into dist-tinygo/ (needs gh auth)
+bun scripts/build-tinygo.ts     # link, go, asm, gopls and compile built with TinyGo into ROOT/tinygo-out (own Go tree; needs gh auth)
+bun scripts/build-tinygo.ts --merge   # lays them over a copy of dist/ as dist-tinygo/
 bun test/browser.ts ./dist      # Chromium acceptance, all scopes
 bun test/browser.ts ./dist --scope=build --serve   # serve one scope; open the URL in another browser
 bun scripts/measure.ts ./dist   # raw/gzip/brotli sizes

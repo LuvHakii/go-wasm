@@ -59,16 +59,19 @@ jobs:
       - name: setup
         run: bun scripts/setup.ts
 
-      - name: build standard-Go tools
-        run: bun scripts/build.ts
+      - parallel:
+          - name: build and gate standard-Go dist
+            run: |
+              bun scripts/build.ts
+              bun test/browser.ts ./dist
 
-      - name: "gate: standard-Go dist"
-        run: bun test/browser.ts ./dist
+          - name: build TinyGo tools
+            env:
+              GH_TOKEN: ${{ github.token }}
+            run: bun scripts/build-tinygo.ts
 
-      - name: build TinyGo tools
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bun scripts/build-tinygo.ts
+      - name: merge TinyGo tools into dist-tinygo
+        run: bun scripts/build-tinygo.ts --merge
 
       - name: "gate: TinyGo dist"
         run: bun test/browser.ts ./dist-tinygo
