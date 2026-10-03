@@ -66,7 +66,9 @@ async function build() {
 		const [goroot, cwd] = name === "asm" ? [asmGoroot, ROOT] : name === "gopls" ? [TINYGO_GOROOT, `${TOOLS}/gopls`] : [TINYGO_GOROOT, ROOT];
 		const args = ["build", "-target=wasip1", "-no-debug", "-interp-timeout=30m", ...flags, `-ldflags=-X runtime.buildVersion=${version}`, ...(tags ? [`-tags=${tags}`] : []), "-o", `${built}/${name}.wasm`, pkg];
 		console.log(`tinygo ${args.join(" ")}`);
+		const started = performance.now();
 		await $`${tinygo} ${args}`.cwd(cwd).env({ ...env, GOROOT: goroot });
+		console.log(`tinygo ${name}: ${Math.round((performance.now() - started) / 1000)} s`);
 	}));
 	console.log(JSON.stringify({ built, tools: specs.map(([name]) => `${name}.wasm`) }));
 }
