@@ -57,7 +57,7 @@ const env = goEnv({
 const manifestPath = `${out}/tool-manifest.json`;
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const built: { path: string; size: number }[] = [];
-for (const [name, pkg, tags, goroot, cwd, flags] of [["link", "cmd/link", "", TINYGO_GOROOT, ROOT, []], ["go", "cmd/go", "cmd_go_bootstrap", TINYGO_GOROOT, ROOT, []], ["asm", "cmd/asm", "", asmGoroot, ROOT, []], ["gopls", ".", "", TINYGO_GOROOT, `${TOOLS}/gopls`, []]] as const) {
+for (const [name, pkg, tags, goroot, cwd, flags] of [["link", "cmd/link", "", TINYGO_GOROOT, ROOT, []], ["go", "cmd/go", "cmd_go_bootstrap", TINYGO_GOROOT, ROOT, []], ["asm", "cmd/asm", "", asmGoroot, ROOT, []], ["gopls", ".", "", TINYGO_GOROOT, `${TOOLS}/gopls`, ["-stack-size=512KB"]]] as const) {
 	const output = `${out}/${name}.wasm`;
 	const args = ["build", "-target=wasip1", "-no-debug", "-interp-timeout=30m", ...flags, `-ldflags=-X runtime.buildVersion=${lock.go.version}`, ...(tags ? [`-tags=${tags}`] : []), "-o", output, pkg];
 	console.log(`tinygo ${args.join(" ")}`);
