@@ -1,0 +1,21 @@
+id: tomarkdown-replaceall
+language: go
+files: [analysis/lint/lint.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'func toMarkdown($$$P) string { $$$B }'
+fix: |-
+  func toMarkdown(s string) string {
+  	return strings.ReplaceAll(strings.ReplaceAll(s, `\'`, "`"), `\"`, "`")
+  }
+---
+id: stripmarkdown-replaceall
+language: go
+files: [analysis/lint/lint.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'func stripMarkdown($$$P) string { $$$B }'
+fix: |-
+  func stripMarkdown(s string) string {
+  	return strings.ReplaceAll(strings.ReplaceAll(s, `\'`, ""), `\"`, "'")
+  }

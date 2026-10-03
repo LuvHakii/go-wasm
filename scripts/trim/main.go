@@ -2,7 +2,7 @@
 //
 // Deletions are anchored by name (function, variable, switch key, selector),
 // never by line number or diff context, so they survive Go version bumps.
-// Insertions live in scripts/gopatch/*.patch.
+// Insertions live in scripts/rules/*.yml.
 // A target that no longer exists is a hard error naming the rule to update.
 //
 // Usage: go run ./scripts/trim [-stubobj] GOROOT_COPY

@@ -2,6 +2,7 @@ import { $ } from "bun";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname } from "node:path";
+import { applyRules } from "./rules.ts";
 import { checkRoot, hash, lock, NATIVE_GO as nativeGo, REPO as repo, ROOT as root, SOURCE as source, TOOLS as tools } from "./common.ts";
 
 checkRoot();
@@ -45,24 +46,14 @@ try {
 	// Source changes: one name-anchored AST codemod plus new overlay files. No line-based diffs.
 	const { GOOS: _os, GOARCH: _arch, ...hostEnv } = env;
 	await $`${nativeGo} run . ${source}`.cwd(`${repo}/scripts/trim`).env({ ...hostEnv, GOROOT: `${root}/go` });
-	// gopatch silently does nothing when its pattern misses, so every target must gain its browser call.
-	const insertions: [string, string][] = [
-		["cmd/go/internal/work/shell.go", "browserRunOut"],
-		["cmd/go/internal/work/buildid.go", "browserToolID"],
-		["cmd/go/internal/base/tool.go", "browserToolPath"],
-	];
-	for (const [target, marker] of insertions) {
-		const file = `${source}/src/${target}`;
-		await $`${root}/bin/gopatch -p ${repo}/scripts/gopatch/browser.patch ${file}`;
-		if (!(await Bun.file(file).text()).includes(marker)) throw new Error(`gopatch browser.patch did not apply to ${target}; update scripts/gopatch for this Go version`);
-	}
+	await applyRules(source, "browser.yml");
 	cpSync(`${repo}/scripts/overlay`, source, { recursive: true });
 	cpSync(`${tools}/internal/browserhost`, `${source}/src/internal/browserhost`, { recursive: true });
 	const patches: { path: string; sha256: string; target: "go" }[] = [];
-	const gopatchFiles = ["scripts/gopatch/browser.patch", "scripts/gopatch/honnef.patch"];
+	const ruleFiles = ["scripts/rules/browser.yml", "scripts/rules/honnef.yml"];
 	const patchFiles = [...new Bun.Glob("*.patch").scanSync({ cwd: `${repo}/patches` })].sort().filter(p => !p.startsWith("tinygo-")).map(p => `patches/${p}`);
 	const goFiles = (dir: string) => [...new Bun.Glob("**/*.go").scanSync({ cwd: `${repo}/${dir}` })].sort().map(p => `${dir}/${p}`);
-	for (const path of [...goFiles("scripts/trim"), ...patchFiles, ...gopatchFiles, ...goFiles("scripts/overlay"), ...goFiles("scripts/overlay-tools")]) {
+	for (const path of [...goFiles("scripts/trim"), ...patchFiles, ...ruleFiles, ...goFiles("scripts/overlay"), ...goFiles("scripts/overlay-tools")]) {
 		patches.push({ path, sha256: await hash(`${repo}/${path}`), target: "go" });
 	}
 

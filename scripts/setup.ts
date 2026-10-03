@@ -1,6 +1,7 @@
 import { $ } from "bun";
 import { createHash } from "node:crypto";
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { applyRules } from "./rules.ts";
 import { checkRoot, GO, goEnv, lock, NATIVE_GO, REPO, ROOT, TOOLS } from "./common.ts";
 
 checkRoot();
@@ -29,7 +30,6 @@ await $`git -C ${TOOLS} checkout -q --force FETCH_HEAD`;
 await $`git -C ${TOOLS} clean -fdq`;
 
 for (const dir of [TOOLS, `${TOOLS}/gopls`, `${REPO}/scripts/trim`]) await $`${NATIVE_GO} mod download`.cwd(dir).env(env);
-await $`${NATIVE_GO} install github.com/uber-go/gopatch@v0.4.0`.env({ ...env, GOBIN: `${ROOT}/bin` });
 await $`${NATIVE_GO} run . -tools ${TOOLS}`.cwd(`${REPO}/scripts/trim`).env(env);
 cpSync(`${REPO}/scripts/overlay-tools`, TOOLS, { recursive: true });
 
@@ -39,9 +39,7 @@ rmSync(honnef, { recursive: true, force: true });
 cpSync(`${ROOT}/module-cache/honnef.co/go/tools@${honnefVersion}`, honnef, { recursive: true });
 const writable = (dir: string) => { chmodSync(dir, 0o755); for (const name of readdirSync(dir)) { const path = `${dir}/${name}`; if (statSync(path).isDirectory()) writable(path); else chmodSync(path, 0o644); } };
 writable(honnef);
-const lint = `${honnef}/analysis/lint/lint.go`;
-await $`${ROOT}/bin/gopatch -p ${REPO}/scripts/gopatch/honnef.patch ${lint}`;
-if ((await Bun.file(lint).text()).includes("NewReplacer")) throw new Error("gopatch honnef.patch did not apply; update scripts/gopatch/honnef.patch for this staticcheck version");
+await applyRules(honnef, "honnef.yml");
 await $`${NATIVE_GO} mod edit -replace=honnef.co/go/tools=../../honnef-tools`.cwd(`${TOOLS}/gopls`).env(env);
 await Bun.write(`${ROOT}/source.json`, JSON.stringify({ version, revision, sha256, bootstrap, builtVersion, toolsRev: lock.tools.rev }, null, 2) + "\n");
 console.log(JSON.stringify({ root: ROOT, version, revision, sha256, builtVersion, toolsRev: lock.tools.rev }));

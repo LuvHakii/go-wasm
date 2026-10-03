@@ -1,6 +1,7 @@
 import { $ } from "bun";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { applyRules } from "./rules.ts";
 import { goEnv, hash, lock, NATIVE_GO, REPO, ROOT, SOURCE, TINYGO, TINYGO_GOROOT, TOOLS } from "./common.ts";
 
 const download = `${ROOT}/downloads/tinygo-${lock.tinygo.commit.slice(0, 8)}.tar.gz`;
@@ -36,15 +37,7 @@ mkdirSync(`${TINYGO_GOROOT}/bin`, { recursive: true });
 cpSync(NATIVE_GO, `${TINYGO_GOROOT}/bin/go`);
 
 cpSync(`${REPO}/scripts/overlay-tinygo`, TINYGO_GOROOT, { recursive: true });
-const callMarkers: [string, string][] = [
-	["text/template/exec.go", "evalCallSig"], ["text/template/funcs.go", "addValueFuncsSig"], ["cmd/go/internal/list/list.go", "template.Fn0"],
-	["cmd/compile/internal/ssagen/ssa.go", "new(ssa.Cache)"],
-];
-for (const [target, marker] of callMarkers) {
-	const file = `${TINYGO_GOROOT}/src/${target}`;
-	await $`${ROOT}/bin/gopatch -p ${REPO}/scripts/gopatch/tinygo.patch ${file}`;
-	if (!(await Bun.file(file).text()).includes(marker)) throw new Error(`gopatch tinygo.patch did not apply to ${target}; update scripts/gopatch/tinygo.patch for this Go version`);
-}
+await applyRules(TINYGO_GOROOT, "tinygo.yml");
 
 const asmGoroot = `${ROOT}/tinygo-goroot-asm`;
 rmSync(asmGoroot, { recursive: true, force: true });
@@ -64,9 +57,9 @@ const env = goEnv({
 const manifestPath = `${out}/tool-manifest.json`;
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const built: { path: string; size: number }[] = [];
-for (const [name, pkg, tags, goroot, cwd] of [["link", "cmd/link", "", TINYGO_GOROOT, ROOT], ["go", "cmd/go", "cmd_go_bootstrap", TINYGO_GOROOT, ROOT], ["asm", "cmd/asm", "", asmGoroot, ROOT], ["gopls", ".", "", TINYGO_GOROOT, `${TOOLS}/gopls`]] as const) {
+for (const [name, pkg, tags, goroot, cwd, flags] of [["link", "cmd/link", "", TINYGO_GOROOT, ROOT, []], ["go", "cmd/go", "cmd_go_bootstrap", TINYGO_GOROOT, ROOT, []], ["asm", "cmd/asm", "", asmGoroot, ROOT, []], ["gopls", ".", "", TINYGO_GOROOT, `${TOOLS}/gopls`, []]] as const) {
 	const output = `${out}/${name}.wasm`;
-	const args = ["build", "-target=wasip1", "-no-debug", "-interp-timeout=30m", `-ldflags=-X runtime.buildVersion=${lock.go.version}`, ...(tags ? [`-tags=${tags}`] : []), "-o", output, pkg];
+	const args = ["build", "-target=wasip1", "-no-debug", "-interp-timeout=30m", ...flags, `-ldflags=-X runtime.buildVersion=${lock.go.version}`, ...(tags ? [`-tags=${tags}`] : []), "-o", output, pkg];
 	console.log(`tinygo ${args.join(" ")}`);
 	await $`${tinygo} ${args}`.cwd(cwd).env({ ...env, GOROOT: goroot });
 	const entry = manifest.artifacts.find((a: { path: string }) => a.path === `${name}.wasm`);
@@ -76,7 +69,7 @@ for (const [name, pkg, tags, goroot, cwd] of [["link", "cmd/link", "", TINYGO_GO
 	entry.size = bytes.length;
 	built.push({ path: `${name}.wasm`, size: bytes.length });
 }
-const tinygoFiles = [...patchFiles.map(p => `patches/${p}`), "scripts/gopatch/tinygo.patch", ...[...new Bun.Glob("**/*.go").scanSync({ cwd: `${REPO}/scripts/overlay-tinygo` })].sort().map(p => `scripts/overlay-tinygo/${p}`)];
+const tinygoFiles = [...patchFiles.map(p => `patches/${p}`), "scripts/rules/tinygo.yml", ...[...new Bun.Glob("**/*.go").scanSync({ cwd: `${REPO}/scripts/overlay-tinygo` })].sort().map(p => `scripts/overlay-tinygo/${p}`)];
 const tinygoHashes: { path: string; sha256: string }[] = [];
 for (const path of tinygoFiles) tinygoHashes.push({ path, sha256: await hash(`${REPO}/${path}`) });
 manifest.provenance.tinygo = { commit: lock.tinygo.commit, artifact: lock.tinygo.artifact, files: tinygoHashes, tools: built.map(b => b.path) };

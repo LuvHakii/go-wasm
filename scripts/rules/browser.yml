@@ -1,0 +1,42 @@
+id: runout-browser
+language: go
+files: [src/cmd/go/internal/work/shell.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'func (sh *Shell) runOut($$$P) ($$$Q) { $$$B }'
+fix: |-
+  func (sh *Shell) runOut($$$P) ($$$Q) {
+  	return sh.browserRunOut(dir, env, cmdargs...)
+  	$$$B
+  }
+---
+id: toolid-browser
+language: go
+files: [src/cmd/go/internal/work/buildid.go]
+metadata: { expect: 1 }
+rule:
+  pattern: |-
+    func (b *Builder) toolID(name string) string {
+    	return b.toolIDCache.Do(name, func() string {
+    		$$$B
+    	})
+    }
+fix: |-
+  func (b *Builder) toolID(name string) string {
+  	return b.toolIDCache.Do(name, func() string {
+  		return browserToolID(name)
+  		$$$B
+  	})
+  }
+---
+id: toolpath-browser
+language: go
+files: [src/cmd/go/internal/base/tool.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'func ToolPath($$$P) ($$$Q) { $$$B }'
+fix: |-
+  func ToolPath($$$P) ($$$Q) {
+  	return browserToolPath(toolName)
+  	$$$B
+  }

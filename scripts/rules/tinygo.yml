@@ -1,0 +1,72 @@
+id: evalcall-table
+language: go
+files: [src/text/template/exec.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'func (s *state) evalCall($$$P) reflect.Value { $$$B }'
+fix: |-
+  func (s *state) evalCall($$$P) reflect.Value {
+  	return s.evalCallSig(dot, fun, isBuiltin, node, name, args, final)
+  	$$$B
+  }
+---
+id: addvaluefuncs-table
+language: go
+files: [src/text/template/funcs.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'func addValueFuncs($$$P) { $$$B }'
+fix: |-
+  func addValueFuncs($$$P) {
+  	addValueFuncsSig(out, in)
+  	return
+  	$$$B
+  }
+---
+id: list-context-wrap
+language: go
+files: [src/cmd/go/internal/list/list.go]
+metadata: { expect: 1 }
+rule:
+  pattern:
+    context: 'x := T{"context": context}'
+    selector: keyed_element
+fix: '"context": template.Fn0(context)'
+---
+id: list-module-wrap
+language: go
+files: [src/cmd/go/internal/list/list.go]
+metadata: { expect: 1 }
+rule:
+  pattern:
+    context: 'x := T{"module": $F}'
+    selector: keyed_element
+fix: '"module": template.Fn1($F)'
+---
+id: ssa-caches-type
+language: go
+files: [src/cmd/compile/internal/ssagen/ssa.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'var ssaCaches []ssa.Cache'
+fix: 'var ssaCaches []*ssa.Cache'
+---
+id: ssa-caches-make
+language: go
+files: [src/cmd/compile/internal/ssagen/ssa.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'ssaCaches = make([]ssa.Cache, base.Flag.LowerC)'
+fix: |-
+  ssaCaches = make([]*ssa.Cache, base.Flag.LowerC)
+  	for i := range ssaCaches {
+  		ssaCaches[i] = new(ssa.Cache)
+  	}
+---
+id: ssa-caches-use
+language: go
+files: [src/cmd/compile/internal/ssagen/ssa.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'cache := &ssaCaches[worker]'
+fix: 'cache := ssaCaches[worker]'
