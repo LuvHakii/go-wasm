@@ -55,18 +55,16 @@ try {
 	}
 
 	staging = mkdtempSync(`${repo}/.dist-stage-`);
-	const buildMetadata: { path: string; goVersion: string; goSourceRevision: string; buildSettings: typeof buildSettings; toolPackage: string }[] = [];
-	for (const [name, pkg, cwd] of [
-		["go", "cmd/go", source], ["link", "cmd/link", source], ["asm", "cmd/asm", source], ["gopls", ".", `${tools}/gopls`], ["compile", "cmd/compile", source],
-	]) {
-		if (!name || !pkg || !cwd) throw new Error("invalid tool build specification");
-		// asm needs the real arch assemblers, so only compile (built last) gets constants-only obj packages.
-		if (name === "compile") await $`${nativeGo} run . -stubobj ${source}`.cwd(`${repo}/scripts/trim`).env({ ...hostEnv, GOROOT: GO });
-		// cmd_go_bootstrap swaps net/http, vcs and auth for stubs: the browser go command never fetches.
-		const tags = name === "go" ? "cmd_go_bootstrap" : "";
+	// cmd_go_bootstrap swaps net/http, vcs and auth for stubs: the browser go command never fetches.
+	const buildTool = async (name: string, pkg: string, cwd: string, tags = "") => {
 		await $`${nativeGo} build -mod=readonly -buildvcs=false -trimpath -tags=${tags} -ldflags=${buildSettings.ldflags} -o ${staging}/${name}.wasm ${pkg}`.env(env).cwd(cwd);
-		buildMetadata.push({ path: `${name}.wasm`, goVersion: version, goSourceRevision: goRevision, buildSettings, toolPackage: pkg });
-	}
+		return { path: `${name}.wasm`, goVersion: version, goSourceRevision: goRevision, buildSettings, toolPackage: pkg };
+	};
+	// Independent builds share the content-addressed GOCACHE; asm must finish before stubobj, which edits the obj packages it reads.
+	const earlier = await Promise.all([buildTool("go", "cmd/go", source, "cmd_go_bootstrap"), buildTool("link", "cmd/link", source), buildTool("asm", "cmd/asm", source), buildTool("gopls", ".", `${tools}/gopls`)]);
+	await $`${nativeGo} run . -stubobj ${source}`.cwd(`${repo}/scripts/trim`).env({ ...hostEnv, GOROOT: GO });
+	// compile, the std list and the two std seeds read nothing the others write.
+	const compiled = buildTool("compile", "cmd/compile", source);
 
 	const bundledPaths = ["lib", "pkg/include", "VERSION", "go.env", "LICENSE", "PATENTS"];
 	const selectedSources = new Set<string>();
@@ -97,16 +95,16 @@ try {
 	const seedRoot = `${root}/std-cache`;
 	rmSync(seedRoot, { recursive: true, force: true });
 	mkdirSync(seedRoot, { recursive: true });
-	const seeds: { GOOS: string; GOARCH: string; CGO_ENABLED: string; GOEXPERIMENT: string; GOFLAGS: string; trimpath: boolean; ldflags: string; cachePath: string; entryFiles: number }[] = [];
-	for (const GOOS of ["wasip1", "js"]) {
+	const seeds = await Promise.all(["wasip1", "js"].map(async GOOS => {
 		const cachePath = `${GOOS}_wasm`;
 		const GOCACHE = `${seedRoot}/${cachePath}`;
 		mkdirSync(GOCACHE, { recursive: true });
 		await $`${nativeGo} build -mod=readonly -trimpath -ldflags=${buildSettings.ldflags} ${seedRoots}`.env({ ...env, GOOS, GOCACHE }).cwd(source);
 		const entryFiles = [...new Bun.Glob("[0-9a-f][0-9a-f]/*").scanSync({ cwd: GOCACHE, onlyFiles: true })].length;
 		if (entryFiles === 0) throw new Error(`standard library cache is empty for ${GOOS}/wasm`);
-		seeds.push({ GOOS, GOARCH: "wasm", CGO_ENABLED: "0", GOEXPERIMENT: "", GOFLAGS: "", trimpath: true, ldflags: buildSettings.ldflags, cachePath, entryFiles });
-	}
+		return { GOOS, GOARCH: "wasm", CGO_ENABLED: "0", GOEXPERIMENT: "", GOFLAGS: "", trimpath: true, ldflags: buildSettings.ldflags, cachePath, entryFiles };
+	}));
+	const buildMetadata = [...earlier, await compiled];
 	await $`tar ${tarFlags} -cf ${staging}/std-cache.tar -C ${seedRoot} wasip1_wasm`;
 	await $`tar ${tarFlags} -cf ${staging}/std-cache-js.tar -C ${seedRoot} js_wasm`;
 
