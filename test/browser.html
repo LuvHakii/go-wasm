@@ -16,12 +16,10 @@ try {
 	if (report.scope !== 'step1') throw new Error('Unknown acceptance scope');
 	if (!report.jspi && !(crossOriginIsolated && report.sharedMemory)) throw new Error('This browser requires JSPI or cross-origin-isolated shared memory.');
 	if (!crossOriginIsolated) throw new Error('Acceptance requires COOP same-origin and COEP require-corp');
-	const [manifestResponse, lockResponse] = await Promise.all([fetch('/dist/tool-manifest.json'), fetch('/source-lock.json')]);
-	if (!manifestResponse.ok || !lockResponse.ok) throw new Error('Cannot load manifest/source lock');
-	const manifest = await manifestResponse.json(), lock = await lockResponse.json();
-	if (!lock?.go || typeof lock.go.version !== 'string' || typeof lock.go.revision !== 'string' || typeof lock.go.sha256 !== 'string') throw new Error('Invalid source lock');
-	if (manifest?.schemaVersion !== 1 || manifest.goVersion !== lock.go.version || manifest.goSourceRevision !== lock.go.revision
-		|| manifest.goSourceSha256 !== lock.go.sha256 || manifest.provenance?.toolsRevision !== lock.tools.rev) throw new Error('Manifest provenance does not match source lock');
+	const [manifestResponse, pinsResponse] = await Promise.all([fetch('/dist/tool-manifest.json'), fetch('/pins.json')]);
+	if (!manifestResponse.ok || !pinsResponse.ok) throw new Error('Cannot load manifest/pins');
+	const manifest = await manifestResponse.json(), pins = await pinsResponse.json();
+	if (manifest?.schemaVersion !== 1 || manifest.goSourceRevision !== pins.goRevision || manifest.provenance?.toolsRevision !== pins.toolsRevision) throw new Error('Manifest provenance does not match the submodule pins');
 	const settings = manifest.buildSettings;
 	if (settings?.GOOS !== 'wasip1' || settings.GOARCH !== 'wasm' || settings.CGO_ENABLED !== '0' || settings.GOEXPERIMENT !== '' || settings.ldflags !== '-s -w') throw new Error('Unexpected build settings');
 	if (!Array.isArray(manifest.artifacts)) throw new Error('Invalid artifacts list');

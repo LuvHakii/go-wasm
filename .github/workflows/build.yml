@@ -28,6 +28,8 @@ jobs:
     timeout-minutes: 340
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - uses: oven-sh/setup-bun@v2
 
@@ -40,14 +42,15 @@ jobs:
       - name: versions
         run: bun scripts/common.ts >> "$GITHUB_ENV"
 
-      - name: cache Go source, native toolchain, modules
+      - name: cache native toolchain, modules
         uses: actions/cache@v4
         with:
           path: |
+            go/bin
+            go/pkg
             ${{ env.ROOT }}/downloads
-            ${{ env.ROOT }}/go
             ${{ env.ROOT }}/module-cache
-          key: go-${{ env.GO_VERSION }}-${{ hashFiles('source-lock.json', 'scripts/setup.ts', 'scripts/common.ts') }}
+          key: go-${{ env.GO_REVISION }}-${{ hashFiles('scripts/setup.ts', 'scripts/common.ts') }}
 
       - name: install deps
         run: |
@@ -66,7 +69,7 @@ jobs:
       - name: "gate: standard-Go dist"
         run: bun test/browser.ts ./dist
 
-      - name: build TinyGo link
+      - name: build TinyGo tools
         env:
           GH_TOKEN: ${{ github.token }}
         run: bun scripts/build-tinygo.ts
@@ -78,8 +81,8 @@ jobs:
         run: |
           mkdir -p release
           cp dist/*.wasm dist/*.tar dist/tool-manifest.json release/
-          cp dist-tinygo/link.wasm release/link.tinygo.wasm
-          cp dist-tinygo/tool-manifest.json release/tool-manifest.tinygo.json
+          tar -cf release/tinygo.tar -C dist-tinygo link.wasm go.wasm asm.wasm gopls.wasm tool-manifest.json
+          bun scripts/common.ts --json > release/versions.json
           ls -la release/
 
       - name: upload dry run
@@ -98,7 +101,7 @@ jobs:
           NOW=$(date -u +%s)
           TAG=$(date -u -d "@$NOW" +%Y%m%d-%H%M)
           NOTES=$(printf 'Go: %s\nx/tools: %s\nTinyGo: %s\n%s\n' \
-            "$GO_VERSION" "$TOOLS_REV" "$TINYGO_COMMIT" "$(date -u -d "@$NOW" +%FT%TZ)")
+            "$GO_REVISION" "$TOOLS_REVISION" "$TINYGO_REVISION" "$(date -u -d "@$NOW" +%FT%TZ)")
           gh release create "$TAG" release/* \
             --target "$GITHUB_SHA" \
             --title "${GITHUB_SHA::7}" \

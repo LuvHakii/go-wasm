@@ -3,10 +3,9 @@ import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { applyRules } from "./rules.ts";
-import { checkRoot, hash, lock, NATIVE_GO as nativeGo, REPO as repo, ROOT as root, SOURCE as source, TOOLS as tools } from "./common.ts";
+import { checkRoot, GO, goVersion, hash, NATIVE_GO as nativeGo, pin, REPO as repo, ROOT as root, SOURCE as source, TOOLS as tools } from "./common.ts";
 
 checkRoot();
-const archive = `${root}/downloads/${lock.go.version}.src.tar.gz`;
 const buildSettings = { GOOS: "wasip1", GOARCH: "wasm", CGO_ENABLED: "0", GOEXPERIMENT: "", ldflags: "-s -w" };
 const env = {
 	...process.env,
@@ -21,54 +20,51 @@ const buildLock = `${root}/build.lock`;
 mkdirSync(buildLock);
 let staging: string | undefined;
 try {
-	if (await hash(archive) !== lock.go.sha256) throw new Error("source archive checksum differs from source-lock.json; run setup");
-	const toolsRevision = (await $`git -C ${tools} rev-parse HEAD`.text()).trim();
-	if (toolsRevision !== lock.tools.rev) throw new Error("x/tools checkout differs from source-lock.json; run setup");
-	const nativeVersion = (await $`${nativeGo} version`.env({ ...env, GOROOT: `${root}/go` }).text()).trim();
-	if (!nativeVersion.startsWith(`go version ${lock.go.version} `)) throw new Error(`unexpected native bootstrap: ${nativeVersion}`);
+	const version = await goVersion(), goRevision = await pin("go"), toolsRevision = await pin("tools");
+	if ((await $`git -C ${tools} rev-parse HEAD`.text()).trim() !== toolsRevision) throw new Error("tools checkout differs from its pin; run setup");
+	if (!(await Bun.file(`${tools}/.patched`).text().catch(() => "")).startsWith(toolsRevision)) throw new Error("tools is not patched for its pin; run setup");
+	const nativeVersion = (await $`${nativeGo} version`.env({ ...env, GOROOT: GO }).text()).trim();
+	if (!nativeVersion.startsWith(`go version ${version} `)) throw new Error(`unexpected native bootstrap: ${nativeVersion}`);
 	rmSync(source, { recursive: true, force: true });
 	mkdirSync(source, { recursive: true });
-	await $`tar -xzf ${archive} --strip-components=1 -C ${source}`;
-	const sourceVersion = (await Bun.file(`${source}/VERSION`).text()).split("\n")[0];
-	if (sourceVersion !== lock.go.version) throw new Error("source archive VERSION differs from source-lock.json");
-	cpSync(`${root}/go/pkg/tool`, `${source}/pkg/tool`, { recursive: true });
-	cpSync(`${root}/go/pkg/include`, `${source}/pkg/include`, { recursive: true });
+	await $`git -C ${GO} archive --format=tar HEAD | tar -x -C ${source}`;
+	await Bun.write(`${source}/VERSION`, `${version}\n`);
+	cpSync(`${GO}/pkg/tool`, `${source}/pkg/tool`, { recursive: true });
 	const generatedSources = [
 		"src/cmd/cgo/zdefaultcc.go", "src/cmd/go/internal/cfg/zdefaultcc.go", "src/cmd/internal/objabi/zbootstrap.go",
 		"src/internal/buildcfg/zbootstrap.go", "src/internal/runtime/sys/zversion.go", "src/time/tzdata/zzipdata.go",
 	];
 	for (const path of generatedSources) {
-		if (!existsSync(`${root}/go/${path}`)) throw new Error(`missing native make.bash-generated source: ${path}`);
+		if (!existsSync(`${GO}/${path}`)) throw new Error(`missing native make.bash-generated source: ${path}`);
 		mkdirSync(dirname(`${source}/${path}`), { recursive: true });
-		cpSync(`${root}/go/${path}`, `${source}/${path}`);
+		cpSync(`${GO}/${path}`, `${source}/${path}`);
 	}
 
 	// Source changes: one name-anchored AST codemod plus new overlay files. No line-based diffs.
 	const { GOOS: _os, GOARCH: _arch, ...hostEnv } = env;
-	await $`${nativeGo} run . ${source}`.cwd(`${repo}/scripts/trim`).env({ ...hostEnv, GOROOT: `${root}/go` });
-	await applyRules(source, "browser.yml");
+	await $`${nativeGo} run . ${source}`.cwd(`${repo}/scripts/trim`).env({ ...hostEnv, GOROOT: GO });
+	await applyRules(source, "go-browser-toolexec.yml");
 	cpSync(`${repo}/scripts/overlay`, source, { recursive: true });
 	cpSync(`${tools}/internal/browserhost`, `${source}/src/internal/browserhost`, { recursive: true });
 	const patches: { path: string; sha256: string; target: "go" }[] = [];
-	const ruleFiles = ["scripts/rules/browser.yml", "scripts/rules/honnef.yml"];
-	const patchFiles = [...new Bun.Glob("*.patch").scanSync({ cwd: `${repo}/patches` })].sort().filter(p => !p.startsWith("tinygo-")).map(p => `patches/${p}`);
+	const patchFiles = ["patches/go-browser-toolexec.yml", "patches/honnef-doc-replaceall.yml"];
 	const goFiles = (dir: string) => [...new Bun.Glob("**/*.go").scanSync({ cwd: `${repo}/${dir}` })].sort().map(p => `${dir}/${p}`);
-	for (const path of [...goFiles("scripts/trim"), ...patchFiles, ...ruleFiles, ...goFiles("scripts/overlay"), ...goFiles("scripts/overlay-tools")]) {
+	for (const path of [...goFiles("scripts/trim"), ...patchFiles, ...goFiles("scripts/overlay"), ...goFiles("scripts/overlay-tools")]) {
 		patches.push({ path, sha256: await hash(`${repo}/${path}`), target: "go" });
 	}
 
 	staging = mkdtempSync(`${repo}/.dist-stage-`);
-	const buildMetadata: { path: string; goVersion: string; goSourceRevision: string; buildSettings: typeof buildSettings; sourceArchiveSha256: string; toolPackage: string }[] = [];
+	const buildMetadata: { path: string; goVersion: string; goSourceRevision: string; buildSettings: typeof buildSettings; toolPackage: string }[] = [];
 	for (const [name, pkg, cwd] of [
 		["go", "cmd/go", source], ["link", "cmd/link", source], ["asm", "cmd/asm", source], ["gopls", ".", `${tools}/gopls`], ["compile", "cmd/compile", source],
 	]) {
 		if (!name || !pkg || !cwd) throw new Error("invalid tool build specification");
 		// asm needs the real arch assemblers, so only compile (built last) gets constants-only obj packages.
-		if (name === "compile") await $`${nativeGo} run . -stubobj ${source}`.cwd(`${repo}/scripts/trim`).env({ ...hostEnv, GOROOT: `${root}/go` });
+		if (name === "compile") await $`${nativeGo} run . -stubobj ${source}`.cwd(`${repo}/scripts/trim`).env({ ...hostEnv, GOROOT: GO });
 		// cmd_go_bootstrap swaps net/http, vcs and auth for stubs: the browser go command never fetches.
 		const tags = name === "go" ? "cmd_go_bootstrap" : "";
 		await $`${nativeGo} build -mod=readonly -buildvcs=false -trimpath -tags=${tags} -ldflags=${buildSettings.ldflags} -o ${staging}/${name}.wasm ${pkg}`.env(env).cwd(cwd);
-		buildMetadata.push({ path: `${name}.wasm`, goVersion: lock.go.version, goSourceRevision: lock.go.revision, buildSettings, sourceArchiveSha256: lock.go.sha256, toolPackage: pkg });
+		buildMetadata.push({ path: `${name}.wasm`, goVersion: version, goSourceRevision: goRevision, buildSettings, toolPackage: pkg });
 	}
 
 	const bundledPaths = ["lib", "pkg/include", "VERSION", "go.env", "LICENSE", "PATENTS"];
@@ -133,10 +129,10 @@ try {
 		artifacts.push({ path, kind, sha256: await hash(`${staging}/${path}`), size: statSync(`${staging}/${path}`).size });
 	}
 	const manifest = {
-		schemaVersion: 1, goVersion: lock.go.version, goSourceRevision: lock.go.revision, goSourceSha256: lock.go.sha256,
+		schemaVersion: 1, goVersion: version, goSourceRevision: goRevision,
 		buildSettings, artifacts, toolBuildSettings: { trimpath: true, mod: "readonly", GOWORK: "off", GOTOOLCHAIN: "local" },
-		toolVersions: { go: lock.go.version, compile: lock.go.version, link: lock.go.version, asm: lock.go.version, gopls: "(devel)" },
-		provenance: { toolsRevision, toolsSourceSha256, sourceFileCount: toolsSources.length, untrackedSources: untracked, moduleFiles, patches, nativeGoVersion: nativeVersion, nativeToolHashes, generatedSources, sourceArchiveSha256: lock.go.sha256, sourceArchiveUrl: lock.go.url, buildMetadata },
+		toolVersions: { go: version, compile: version, link: version, asm: version, gopls: "(devel)" },
+		provenance: { toolsRevision, toolsSourceSha256, sourceFileCount: toolsSources.length, untrackedSources: untracked, moduleFiles, patches, nativeGoVersion: nativeVersion, nativeToolHashes, generatedSources, buildMetadata },
 		goroot: { mountPath: "/goroot", bundledPaths },
 		stdCache: { browserCompatibility: "requires browser acceptance for these artifact hashes", layout: "<goos>_wasm/<Go content-addressed cache entries>", archives: { wasip1: "std-cache.tar", js: "std-cache-js.tar" }, seeds },
 	};

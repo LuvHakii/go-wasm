@@ -1,0 +1,13 @@
+[submodule "go"]
+	path = go
+	url = https://github.com/golang/go
+	shallow = true
+[submodule "tools"]
+	path = tools
+	url = https://github.com/golang/tools
+	shallow = true
+[submodule "tinygo"]
+	path = tinygo
+	url = https://github.com/tinygo-org/tinygo
+	update = none
+	shallow = true

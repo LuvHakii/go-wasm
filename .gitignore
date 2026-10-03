@@ -5,3 +5,4 @@ dist-tinygo/
 node_modules
 *.log
 release/
+honnef-tools/

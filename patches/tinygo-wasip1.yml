@@ -1,0 +1,105 @@
+id: os-exec-time-import
+language: go
+files: [src/os/exec.go]
+metadata: { expect: 1 }
+rule:
+  pattern: |-
+    import (
+    	"errors"
+    	"syscall"
+    )
+fix: |-
+  import (
+  	"errors"
+  	"syscall"
+  	"time"
+  )
+---
+id: os-process-times
+language: go
+files: [src/os/exec.go]
+metadata: { expect: 1 }
+rule:
+  pattern: |-
+    type Process struct {
+    	Pid int
+    }
+fix: |-
+  func (p *ProcessState) UserTime() time.Duration { return 0 }
+
+  func (p *ProcessState) SystemTime() time.Duration { return 0 }
+
+  type Process struct {
+  	Pid int
+  }
+---
+id: os-removeall-generic-other
+language: go
+files: [src/os/removeall_other.go]
+metadata: { expect: 1 }
+rule:
+  kind: comment
+  regex: '^//go:build baremetal \|\| js \|\| wasip1 \|\| wasip2 '
+fix: '//go:build baremetal || js || wasip2 || wasm_unknown || nintendoswitch'
+---
+id: os-removeall-generic-noat
+language: go
+files: [src/os/removeall_noat.go]
+metadata: { expect: 1 }
+rule:
+  kind: comment
+  regex: '^//go:build !baremetal && !js && !wasip1 && !wasip2 '
+fix: '//go:build !baremetal && !js && !wasip2 && !wasm_unknown && !nintendoswitch'
+---
+id: reflect-methodbyname-invalid
+language: go
+files: [src/reflect/value.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'func (v Value) MethodByName(name string) Value { $$$B }'
+fix: |-
+  func (v Value) MethodByName(name string) Value {
+  	return Value{}
+  }
+---
+id: runtime-compiler-gc
+language: go
+files: [src/runtime/runtime.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'const Compiler = "tinygo"'
+fix: 'const Compiler = "gc"'
+---
+id: reflectlite-fieldbyindexerr
+language: go
+files: [src/internal/reflectlite/value.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'func (v Value) FieldByIndexErr(index []int) (Value, error) { $$$B }'
+fix: |-
+  func (v Value) FieldByIndexErr(index []int) (Value, error) {
+  	if len(index) == 1 {
+  		return v.Field(index[0]), nil
+  	}
+  	if v.Kind() != Struct {
+  		return Value{}, &ValueError{"FieldByIndexErr", v.Kind()}
+  	}
+  	for i, x := range index {
+  		if i > 0 {
+  			if v.Kind() == Pointer && v.typecode.elem().Kind() == Struct {
+  				if v.IsNil() {
+  					return Value{}, nilEmbeddedError{}
+  				}
+  				v = v.Elem()
+  			}
+  		}
+  		v = v.Field(x)
+  	}
+  	return v, nil
+  }
+
+  type nilEmbeddedError struct{}
+
+  func (nilEmbeddedError) Error() string {
+  	return "reflect: indirection through nil pointer to embedded struct field"
+  }

@@ -5,7 +5,7 @@ import { REPO } from "./common.ts";
 const ASTGREP = `${REPO}/node_modules/.bin/ast-grep`;
 
 export async function applyRules(root: string, name: string) {
-	const file = `${REPO}/scripts/rules/${name}`;
+	const file = `${REPO}/patches/${name}`;
 	const expect = new Map<string, number>();
 	const targets = new Set<string>();
 	for (const doc of readFileSync(file, "utf8").split(/^---$/m)) {
@@ -25,7 +25,7 @@ export async function applyRules(root: string, name: string) {
 	}
 	for (const [id, want] of expect) {
 		const got = hits.get(id) ?? 0;
-		if (got !== want) throw new Error(`rule ${id} matched ${got} times, expected ${want}; update scripts/rules/${name} for this version`);
+		if (got !== want) throw new Error(`rule ${id} matched ${got} times, expected ${want}; update patches/${name} for this version`);
 	}
 	await $`${ASTGREP} scan -r ${file} ${[...targets]} -U`.cwd(root).quiet();
 }

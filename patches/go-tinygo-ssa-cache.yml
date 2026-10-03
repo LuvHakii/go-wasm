@@ -1,0 +1,27 @@
+id: ssa-caches-type
+language: go
+files: [src/cmd/compile/internal/ssagen/ssa.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'var ssaCaches []ssa.Cache'
+fix: 'var ssaCaches []*ssa.Cache'
+---
+id: ssa-caches-make
+language: go
+files: [src/cmd/compile/internal/ssagen/ssa.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'ssaCaches = make([]ssa.Cache, base.Flag.LowerC)'
+fix: |-
+  ssaCaches = make([]*ssa.Cache, base.Flag.LowerC)
+  	for i := range ssaCaches {
+  		ssaCaches[i] = new(ssa.Cache)
+  	}
+---
+id: ssa-caches-use
+language: go
+files: [src/cmd/compile/internal/ssagen/ssa.go]
+metadata: { expect: 1 }
+rule:
+  pattern: 'cache := &ssaCaches[worker]'
+fix: 'cache := ssaCaches[worker]'

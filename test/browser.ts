@@ -1,5 +1,6 @@
 import { cpSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { $ } from 'bun';
+import { pin } from '../scripts/common.ts';
 import { homedir } from 'node:os';
 import { resolve, sep } from 'node:path';
 import { realpath } from 'node:fs/promises';
@@ -42,7 +43,7 @@ if (typeof manifest !== 'object' || manifest === null || !('artifacts' in manife
 const routes: Record<string, Blob> = {
 	'/': Bun.file(resolve(import.meta.dir, 'browser.html')),
 	'/browser.html': Bun.file(resolve(import.meta.dir, 'browser.html')),
-	'/source-lock.json': Bun.file(resolve(import.meta.dir, '../source-lock.json')),
+	'/pins.json': new Blob([JSON.stringify({ goRevision: await pin('go'), toolsRevision: await pin('tools') })], { type: 'application/json' }),
 	'/dist/tool-manifest.json': manifestFile,
 };
 for (const artifact of manifest.artifacts) {
