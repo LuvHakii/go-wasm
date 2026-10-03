@@ -90,12 +90,16 @@ func main() {
 		runTools(args[1])
 		return
 	}
+	if len(args) == 2 && args[0] == "-tinygo" {
+		rewrite(filepath.Join(args[1], "src/cmd/compile/internal/ssa/opGen.go"), []edit{splitOpcodeInit(200)})
+		return
+	}
 	stubObj := len(args) > 0 && args[0] == "-stubobj"
 	if stubObj {
 		args = args[1:]
 	}
 	if len(args) != 1 {
-		log.Fatal("usage: trim [-stubobj] GOROOT_COPY | trim -tools TOOLS_CHECKOUT")
+		log.Fatal("usage: trim [-stubobj] GOROOT_COPY | trim -tinygo GOROOT_COPY | trim -tools TOOLS_CHECKOUT")
 	}
 	src := filepath.Join(args[0], "src")
 	if stubObj {
@@ -105,6 +109,7 @@ func main() {
 		// Their rewrite functions are unreachable once NewConfig keeps only wasm,
 		// and they call into the assemblers that were just reduced to constants.
 		deleteGlobs(filepath.Join(src, "cmd/compile/internal/ssa"), "rewrite386*.go", "rewriteAMD64*.go", "rewriteARM*.go", "rewriteLOONG64*.go", "rewriteMIPS*.go", "rewritePPC64*.go", "rewriteRISCV64*.go", "rewriteS390X*.go")
+		rewrite(filepath.Join(src, "cmd/compile/internal/ssa/opGen.go"), []edit{thinOpcodeTable("Op386", "OpAMD64", "OpARM", "OpLOONG64", "OpMIPS", "OpPPC64", "OpRISCV64", "OpS390X")})
 		return
 	}
 	for _, r := range rules {
@@ -459,5 +464,121 @@ func deleteGlobs(dir string, patterns ...string) {
 	}
 	if n == 0 {
 		log.Fatalf("%s: nothing matched %v (update scripts/trim/main.go for this Go version)", dir, patterns)
+	}
+}
+
+func thinOpcodeTable(archPrefixes ...string) edit {
+	return func(fset *token.FileSet, f *ast.File) error {
+		var names []string
+		var table *ast.CompositeLit
+		for _, d := range f.Decls {
+			g, ok := d.(*ast.GenDecl)
+			if !ok {
+				continue
+			}
+			for _, spec := range g.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok || len(vs.Names) != 1 {
+					continue
+				}
+				switch {
+				case g.Tok == token.CONST && g.Specs[0].(*ast.ValueSpec).Names[0].Name == "OpInvalid":
+					names = append(names, vs.Names[0].Name)
+				case g.Tok == token.VAR && vs.Names[0].Name == "opcodeTable" && len(vs.Values) == 1:
+					table, _ = vs.Values[0].(*ast.CompositeLit)
+				}
+			}
+		}
+		if table == nil || len(names) != len(table.Elts) {
+			return fmt.Errorf("opcodeTable has %d entries for %d ops", len(table.Elts), len(names))
+		}
+		kept := table.Elts[:0:0]
+		for i, e := range table.Elts {
+			drop := false
+			for _, p := range archPrefixes {
+				drop = drop || strings.HasPrefix(names[i], p)
+			}
+			if drop {
+				dropComments(f, e.Pos(), e.End())
+				continue
+			}
+			kept = append(kept, &ast.KeyValueExpr{Key: ast.NewIdent(names[i]), Value: e})
+		}
+		table.Elts = kept
+		return nil
+	}
+}
+
+func splitOpcodeInit(chunk int) edit {
+	return func(fset *token.FileSet, f *ast.File) error {
+		for i, d := range f.Decls {
+			g, ok := d.(*ast.GenDecl)
+			if !ok || g.Tok != token.VAR || len(g.Specs) != 1 {
+				continue
+			}
+			vs := g.Specs[0].(*ast.ValueSpec)
+			if len(vs.Names) != 1 || vs.Names[0].Name != "opcodeTable" || len(vs.Values) != 1 {
+				continue
+			}
+			table, ok := vs.Values[0].(*ast.CompositeLit)
+			if !ok {
+				return fmt.Errorf("opcodeTable is not a composite literal")
+			}
+			arr, ok := table.Type.(*ast.ArrayType)
+			if !ok {
+				return fmt.Errorf("opcodeTable is not an array")
+			}
+			var size int
+			for _, g2 := range f.Decls {
+				if c, ok := g2.(*ast.GenDecl); ok && c.Tok == token.CONST && len(c.Specs) > 0 {
+					if first, ok := c.Specs[0].(*ast.ValueSpec); ok && first.Names[0].Name == "OpInvalid" {
+						size = len(c.Specs)
+					}
+				}
+			}
+			if size == 0 {
+				return fmt.Errorf("op constants not found")
+			}
+			dropComments(f, table.Pos(), table.End())
+			var funcs []ast.Decl
+			var body []ast.Stmt
+			flush := func() {
+				if len(body) == 0 {
+					return
+				}
+				funcs = append(funcs, &ast.FuncDecl{
+					Doc:  &ast.CommentGroup{List: []*ast.Comment{{Text: "//go:noinline"}}},
+					Name: ast.NewIdent("init"),
+					Type: &ast.FuncType{Params: &ast.FieldList{}},
+					Body: &ast.BlockStmt{List: body},
+				})
+				body = nil
+			}
+			for _, e := range table.Elts {
+				kv, ok := e.(*ast.KeyValueExpr)
+				if !ok {
+					return fmt.Errorf("opcodeTable is not keyed")
+				}
+				lit, ok := kv.Value.(*ast.CompositeLit)
+				if !ok {
+					return fmt.Errorf("opcodeTable entry is not a literal")
+				}
+				lit.Type = ast.NewIdent("opInfo")
+				body = append(body, &ast.AssignStmt{
+					Lhs: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent("opcodeTable"), Index: kv.Key}},
+					Tok: token.ASSIGN,
+					Rhs: []ast.Expr{lit},
+				})
+				if len(body) == chunk {
+					flush()
+				}
+			}
+			flush()
+			vs.Type = &ast.ArrayType{Len: &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(size)}, Elt: arr.Elt}
+			vs.Values = nil
+			f.Decls = append(append(append([]ast.Decl{}, f.Decls[:i+1]...), funcs...), f.Decls[i+1:]...)
+			return nil
+		}
+		return fmt.Errorf("var opcodeTable not found")
 	}
 }
