@@ -1,8 +1,7 @@
 import { $ } from "bun";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
-import { dirname } from "node:path";
-import { applyRules } from "./rules.ts";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { generatedSources, prepareSource } from "./source.ts";
 import { checkRoot, GO, goVersion, hash, NATIVE_GO as nativeGo, pin, REPO as repo, ROOT as root, SOURCE as source, TOOLS as tools } from "./common.ts";
 
 checkRoot();
@@ -25,28 +24,8 @@ try {
 	if (!(await Bun.file(`${tools}/.patched`).text().catch(() => "")).startsWith(toolsRevision)) throw new Error("tools is not patched for its pin; run setup");
 	const nativeVersion = (await $`${nativeGo} version`.env({ ...env, GOROOT: GO }).text()).trim();
 	if (!nativeVersion.startsWith(`go version ${version} `)) throw new Error(`unexpected native bootstrap: ${nativeVersion}`);
-	rmSync(source, { recursive: true, force: true });
-	mkdirSync(source, { recursive: true });
-	await $`git -C ${GO} archive --format=tar HEAD | tar -x -C ${source}`;
-	await Bun.write(`${source}/VERSION`, `${version}\n`);
-	cpSync(`${GO}/pkg/tool`, `${source}/pkg/tool`, { recursive: true });
-	cpSync(`${GO}/pkg/include`, `${source}/pkg/include`, { recursive: true });
-	const generatedSources = [
-		"src/cmd/cgo/zdefaultcc.go", "src/cmd/go/internal/cfg/zdefaultcc.go", "src/cmd/internal/objabi/zbootstrap.go",
-		"src/internal/buildcfg/zbootstrap.go", "src/internal/runtime/sys/zversion.go", "src/time/tzdata/zzipdata.go",
-	];
-	for (const path of generatedSources) {
-		if (!existsSync(`${GO}/${path}`)) throw new Error(`missing native make.bash-generated source: ${path}`);
-		mkdirSync(dirname(`${source}/${path}`), { recursive: true });
-		cpSync(`${GO}/${path}`, `${source}/${path}`);
-	}
-
-	// Source changes: one name-anchored AST codemod plus new overlay files. No line-based diffs.
+	await prepareSource(source);
 	const { GOOS: _os, GOARCH: _arch, ...hostEnv } = env;
-	await $`${nativeGo} run . ${source}`.cwd(`${repo}/scripts/trim`).env({ ...hostEnv, GOROOT: GO });
-	await applyRules(source, "go-browser-toolexec.yml");
-	cpSync(`${repo}/scripts/overlay`, source, { recursive: true });
-	cpSync(`${tools}/internal/browserhost`, `${source}/src/internal/browserhost`, { recursive: true });
 	const patches: { path: string; sha256: string; target: "go" }[] = [];
 	const patchFiles = ["patches/go-browser-toolexec.yml", "patches/honnef-doc-replaceall.yml"];
 	const goFiles = (dir: string) => [...new Bun.Glob("**/*.go").scanSync({ cwd: `${repo}/${dir}` })].sort().map(p => `${dir}/${p}`);
