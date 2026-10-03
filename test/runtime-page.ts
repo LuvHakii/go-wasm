@@ -56,6 +56,7 @@ async function run(mode: 'jspi' | 'mailbox') {
 		const listed = await command(['list', '-e', '-deps', '-compiled', '-json=ImportPath,GoFiles,Error', './...']);
 		if (typeof listed.stdout !== 'string' || !listed.stdout.includes('example.test/browser') || listed.stdout.includes('excluded_linux.go') || listed.stdout.includes('"Error"')) throw new Error(`Incorrect package metadata: ${listed.stdout}`);
 		if (new URLSearchParams(location.search).get('scope') === 'editor') {
+			const tStart = performance.now();
 			worker.postMessage({ kind: 'gopls' }); await wait('gopls-ready');
 			const rpc = (message: object) => worker.postMessage({ kind: 'lsp', json: JSON.stringify({ jsonrpc: '2.0', ...message }) });
 			const response = async (id: number) => {
@@ -68,6 +69,7 @@ async function run(mode: 'jspi' | 'mailbox') {
 			};
 			rpc({ id: 100, method: 'initialize', params: { processId: null, rootUri: 'file:///workspace', capabilities: {} } });
 			const initialized = await response(100);
+			const initializeMs = Math.round(performance.now() - tStart);
 			if (!initialized.capabilities.hoverProvider || !initialized.capabilities.completionProvider) throw new Error('Core editor capabilities missing');
 			rpc({ method: 'initialized', params: {} });
 			rpc({ method: 'textDocument/didOpen', params: { textDocument: { uri: 'file:///workspace/main.go', languageId: 'go', version: 1, text: 'package main\nvar answer int = \"bad\"\nfunc main() {}\n' } } });
@@ -78,6 +80,7 @@ async function run(mode: 'jspi' | 'mailbox') {
 				const message = JSON.parse(event.json);
 				if (message.method === 'textDocument/publishDiagnostics' && message.params.uri === 'file:///workspace/main.go' && message.params.diagnostics.some((diagnostic: { message: string }) => diagnostic.message.includes('cannot use'))) diagnosed = true;
 			}
+			const firstDiagnosticsMs = Math.round(performance.now() - tStart);
 			rpc({ method: 'textDocument/didChange', params: { textDocument: { uri: 'file:///workspace/main.go', version: 2 }, contentChanges: [{ text: 'package main\nvar answer int = 42\nfunc main() {}\n' }] } });
 			let cleared = false;
 			while (!cleared) {
@@ -115,8 +118,38 @@ async function run(mode: 'jspi' | 'mailbox') {
 				}
 			}
 			replies.push({ kind: 'staticcheck-proof', S1000: staticcheck });
+			const richUri = 'file:///workspace/rich/rich.go';
+			const richText = 'package rich\n\nimport (\n\t"fmt"\n\t"strings"\n)\n\ntype Shape interface {\n\tArea() float64\n}\n\ntype Rect struct{ W, H float64 }\n\nfunc (r Rect) Area() float64 { return r.W * r.H }\n\ntype Circle struct{ R float64 }\n\nfunc (c Circle) Area() float64 { return 3.14 * c.R * c.R }\n\nfunc Total(shapes ...Shape) float64 {\n\tvar sum float64\n\tfor _, s := range shapes {\n\t\tsum += s.Area()\n\t}\n\treturn sum\n}\n\nfunc Describe(s Shape) string {\n\treturn fmt.Sprintf("%T %.1f", s, s.Area())\n}\n\nfunc Join(parts []string) string { return strings.Join(parts, ",") }\n';
+			rpc({ method: 'textDocument/didOpen', params: { textDocument: { uri: richUri, languageId: 'go', version: 1, text: richText } } });
+			const timings: Record<string, number> = {};
+			let nextId = 200;
+			const ask = async (name: string, method: string, params: object, check: (result: any) => boolean) => {
+				const id = nextId++, started = performance.now();
+				rpc({ id, method, params });
+				const result = await response(id);
+				timings[name] = Math.round(performance.now() - started);
+				if (!check(result)) throw new Error(`${name}: unexpected result ${JSON.stringify(result).slice(0, 400)}`);
+			};
+			const doc = { uri: richUri };
+			const at = (line: number, character: number) => ({ textDocument: doc, position: { line, character } });
+			const has = (text: string) => (result: unknown) => JSON.stringify(result).includes(text);
+			await ask('documentSymbol', 'textDocument/documentSymbol', { textDocument: doc }, result => has('Total')(result) && has('Rect')(result));
+			await ask('hover', 'textDocument/hover', at(19, 6), has('Total'));
+			await ask('references', 'textDocument/references', { ...at(8, 2), context: { includeDeclaration: true } }, result => Array.isArray(result) && result.length >= 2);
+			await ask('implementation', 'textDocument/implementation', at(8, 2), result => Array.isArray(result) && result.length >= 2);
+			const joinLine = richText.split('\n')[31] ?? '';
+			await ask('signatureHelp', 'textDocument/signatureHelp', at(31, joinLine.indexOf('strings.Join(') + 'strings.Join('.length + 2), has('Join'));
+			await ask('documentHighlight', 'textDocument/documentHighlight', at(19, 6), result => Array.isArray(result) && result.length >= 1);
+			await ask('foldingRange', 'textDocument/foldingRange', { textDocument: doc }, result => Array.isArray(result) && result.length >= 3);
+			await ask('prepareRename', 'textDocument/prepareRename', at(19, 6), result => result !== null);
+			await ask('workspaceSymbol', 'workspace/symbol', { query: 'Describe' }, has('Describe'));
+			await ask('codeAction', 'textDocument/codeAction', { textDocument: doc, range: { start: { line: 19, character: 5 }, end: { line: 19, character: 10 } }, context: { diagnostics: [] } }, has('Add test'));
+			replies.push({ kind: 'editor-bench-proof', initializeMs, firstDiagnosticsMs, requestMs: timings });
+
 			rpc({ id: 102, method: 'shutdown', params: null }); await response(102);
 			rpc({ method: 'exit', params: null });
+			const exited = await wait('gopls-exit');
+			replies.push({ kind: 'gopls-memory-proof', linearMemoryMiB: Math.round(Number(exited.linearMemoryCapacityBytes) / 1048576) });
 		}
 		if (new URLSearchParams(location.search).get('scope') === 'build') {
 			const built = await command(['build', '-ldflags=-s -w', '-o', '/workspace/out.wasm', './']);
