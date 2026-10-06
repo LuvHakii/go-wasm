@@ -1,15 +1,12 @@
 diff --git a/compiler/compiler.go b/compiler/compiler.go
-index 6f8b89a..e2ec005 100644
+index 6f8b89a..63d3325 100644
 --- a/compiler/compiler.go
 +++ b/compiler/compiler.go
-@@ -1400,6 +1400,20 @@ func (b *builder) createFunctionStart(intrinsic bool) {
+@@ -1400,6 +1400,17 @@ func (b *builder) createFunctionStart(intrinsic bool) {
  		// It is necessary to pass a dummy alloca to runtime.trackPointer
  		// because runtime.trackPointer is replaced by an alloca store.
  		b.stackChainAlloca = b.CreateAlloca(b.ctx.Int8Type(), "stackalloc")
 +
-+		// Parameters and closure variables are live from function entry. On
-+		// targets that need stack objects they are not scanned anywhere else,
-+		// so spill them like any other tracked value.
 +		for _, param := range b.fn.Params {
 +			if value, ok := b.locals[param]; ok && len(*param.Referrers()) != 0 {
 +				b.trackValue(value)
@@ -24,10 +21,10 @@ index 6f8b89a..e2ec005 100644
  }
  
 diff --git a/transform/gc.go b/transform/gc.go
-index 824aa23..8299599 100644
+index 824aa23..c5d5eeb 100644
 --- a/transform/gc.go
 +++ b/transform/gc.go
-@@ -165,12 +165,19 @@ func MakeGCStackSlots(mod llvm.Module) bool {
+@@ -165,12 +165,18 @@ func MakeGCStackSlots(mod llvm.Module) bool {
  			call.EraseFromParentAsInstruction()
  
  			// Some trivial optimizations.
@@ -40,7 +37,6 @@ index 824aa23..8299599 100644
  				continue
  			}
 +			if isArgument {
-+				// A parameter is live from function entry and needs a slot.
 +				rooted[ptr] = struct{}{}
 +				pointers = append(pointers, ptr)
 +				continue
@@ -48,7 +44,7 @@ index 824aa23..8299599 100644
  			switch ptr.InstructionOpcode() {
  			case llvm.GetElementPtr:
  				// Check for all zero offsets.
-@@ -287,7 +294,8 @@ func MakeGCStackSlots(mod llvm.Module) bool {
+@@ -287,7 +293,8 @@ func MakeGCStackSlots(mod llvm.Module) bool {
  		stackObjectType := ctx.StructType(fields, false)
  
  		// Create the stack object at the function entry.
@@ -58,7 +54,7 @@ index 824aa23..8299599 100644
  		stackObject := builder.CreateAlloca(stackObjectType, "gc.stackobject")
  		initialStackObject := llvm.ConstNull(stackObjectType)
  		numSlots := (targetData.TypeAllocSize(stackObjectType) - uint64(targetData.PointerSize())*2) / uint64(targetData.ABITypeAlignment(uintptrType))
-@@ -308,7 +316,10 @@ func MakeGCStackSlots(mod llvm.Module) bool {
+@@ -308,7 +315,10 @@ func MakeGCStackSlots(mod llvm.Module) bool {
  		pointerStores := make(map[llvm.Value]struct{})
  		for i, ptr := range pointers {
  			// Insert the store after the pointer value is created.
