@@ -1,0 +1,85 @@
+id: gc-roots-track-params
+language: go
+files: [compiler/compiler.go]
+metadata: { expect: 1 }
+rule:
+  pattern: b.stackChainAlloca = b.CreateAlloca(b.ctx.Int8Type(), "stackalloc")
+fix: |-
+  b.stackChainAlloca = b.CreateAlloca(b.ctx.Int8Type(), "stackalloc")
+  for _, param := range b.fn.Params {
+  	if value, ok := b.locals[param]; ok && len(*param.Referrers()) != 0 {
+  		b.trackValue(value)
+  	}
+  }
+  for _, freeVar := range b.fn.FreeVars {
+  	if value, ok := b.locals[freeVar]; ok && len(*freeVar.Referrers()) != 0 {
+  		b.trackValue(value)
+  	}
+  }
+---
+id: gc-roots-track-kinds
+language: go
+files: [compiler/gc.go]
+metadata: { expect: 1 }
+rule:
+  pattern: '*ssa.Next'
+  inside:
+    kind: type_case
+fix: '*ssa.Next, *ssa.Slice, *ssa.TypeAssert, *ssa.Lookup, *ssa.ChangeInterface, *ssa.Field'
+---
+id: gc-roots-argument-check
+language: go
+files: [transform/gc.go]
+metadata: { expect: 1 }
+rule:
+  pattern: |-
+    if ptr.IsAInstruction().IsNil() {
+    	continue
+    }
+fix: |-
+  isArgument := !ptr.IsAArgument().IsNil()
+  if ptr.IsAInstruction().IsNil() && !isArgument {
+  	continue
+  }
+---
+id: gc-roots-argument-slot
+language: go
+files: [transform/gc.go]
+metadata: { expect: 1 }
+rule:
+  pattern: |-
+    if _, ok := rooted[ptr]; ok {
+    	continue
+    }
+fix: |-
+  if _, ok := rooted[ptr]; ok {
+  	continue
+  }
+  if isArgument {
+  	rooted[ptr] = struct{}{}
+  	pointers = append(pointers, ptr)
+  	continue
+  }
+---
+id: gc-roots-entry-point
+language: go
+files: [transform/gc.go]
+metadata: { expect: 1 }
+rule:
+  kind: call_expression
+  regex: '^builder\.SetInsertPointBefore\(fn\.EntryBasicBlock\(\)\.FirstInstruction\(\)\)$'
+fix: |-
+  entryFirst := fn.EntryBasicBlock().FirstInstruction()
+  builder.SetInsertPointBefore(entryFirst)
+---
+id: gc-roots-argument-store
+language: go
+files: [transform/gc.go]
+metadata: { expect: 1 }
+rule:
+  pattern: insertionPoint := llvm.NextInstruction(ptr)
+fix: |-
+  insertionPoint := entryFirst
+  if ptr.IsAArgument().IsNil() {
+  	insertionPoint = llvm.NextInstruction(ptr)
+  }
