@@ -100,7 +100,7 @@ async function buildPatchedTinyGo() {
 	const ldflags = `-L${llvm}/lib -lclang -lclang-cpp -Wl,--start-group ${lldLibs} -Wl,--end-group ${await config("--ldflags", "--libs")} ${system} -lstdc++ -Wl,-rpath,${llvm}/lib`;
 	const output = `${TINYGO}/bin/tinygo-patched`;
 	await $`${NATIVE_GO} build -buildmode exe -o ${output} -tags ${"byollvm llvm22 osusergo"} .`.cwd(src).env(goEnv({
-		GOROOT: GO, CGO_CPPFLAGS: `${await config("--cppflags")} -I${llvm}/include`, CGO_CXXFLAGS: "-std=c++17", CGO_LDFLAGS: ldflags,
+		GOROOT: GO, CGO_ENABLED: "1", CGO_CPPFLAGS: `${await config("--cppflags")} -I${llvm}/include`, CGO_CXXFLAGS: "-std=c++17", CGO_LDFLAGS: ldflags,
 	}));
 	console.log((await $`${output} version`.env({ ...process.env, TINYGOROOT: TINYGO }).text()).trim());
 	return output;
