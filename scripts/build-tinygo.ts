@@ -9,7 +9,7 @@ const built = `${ROOT}/tinygo-out`;
 const specs = [["link", "cmd/link", "", []], ["go", "cmd/go", "cmd_go_bootstrap", []], ["asm", "cmd/asm", "", []], ["gopls", ".", "", ["-stack-size=512KB"]], ["compile", "cmd/compile", "", ["-opt=1", "-stack-size=512KB"]]] as const;
 const commit = await pin("tinygo");
 const llvmRelease = "llvmorg-22.1.8", llvmAsset = "LLVM-22.1.8-Linux-X64";
-const lldLibs = "-lldCOFF -lldCommon -lldELF -lldMachO -lldMinGW -lldWasm";
+const lldLibs = "-llldCOFF -llldCommon -llldELF -llldMachO -llldMinGW -llldWasm";
 
 if (process.argv.includes("--merge")) await merge();
 else await build();
@@ -85,7 +85,7 @@ async function buildPatchedTinyGo() {
 		const tarball = `${ROOT}/downloads/${llvmAsset}.tar.xz`;
 		if (!existsSync(tarball)) await $`gh release download ${llvmRelease} -R llvm/llvm-project -p ${`${llvmAsset}.tar.xz`} -D ${ROOT}/downloads`;
 		mkdirSync(`${ROOT}/llvm`, { recursive: true });
-		await $`tar -xJf ${tarball} -C ${ROOT}/llvm --wildcards ${`${llvmAsset}/include`} ${`${llvmAsset}/bin/llvm-config`} ${`${llvmAsset}/lib/lib*.a`} ${`${llvmAsset}/lib/libclang.so*`}`;
+		await $`tar -xJf ${tarball} -C ${ROOT}/llvm --wildcards ${`${llvmAsset}/include`} ${`${llvmAsset}/bin/llvm-config`} ${`${llvmAsset}/lib/lib*.a`} ${`${llvmAsset}/lib/libclang.so*`} ${`${llvmAsset}/lib/libclang-cpp.so*`}`;
 		rmSync(tarball, { force: true });
 	}
 	const src = `${ROOT}/tinygo-src`;
