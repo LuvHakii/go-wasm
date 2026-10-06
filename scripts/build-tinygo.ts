@@ -6,8 +6,10 @@ import { prepareSource } from "./source.ts";
 import { GO, goEnv, hash, goVersion, NATIVE_GO, pin, REPO, ROOT, TINYGO, TINYGO_GOROOT, TOOLS } from "./common.ts";
 
 const built = `${ROOT}/tinygo-out`;
-const specs = [["link", "cmd/link", "", []], ["go", "cmd/go", "cmd_go_bootstrap", []], ["asm", "cmd/asm", "", []], ["gopls", ".", "", ["-stack-size=512KB"]], ["compile", "cmd/compile", "", ["-opt=1", "-gc=leaking", "-stack-size=512KB"]]] as const;
+const specs = [["link", "cmd/link", "", []], ["go", "cmd/go", "cmd_go_bootstrap", []], ["asm", "cmd/asm", "", []], ["gopls", ".", "", ["-stack-size=512KB"]], ["compile", "cmd/compile", "", ["-opt=1", "-stack-size=512KB"]]] as const;
 const commit = await pin("tinygo");
+const llvmRelease = "llvmorg-22.1.8", llvmAsset = "LLVM-22.1.8-Linux-X64";
+const lldLibs = "-lldCOFF -lldCommon -lldELF -lldMachO -lldMinGW -lldWasm";
 
 if (process.argv.includes("--merge")) await merge();
 else await build();
@@ -33,6 +35,7 @@ async function build() {
 	const tinygo = `${TINYGO}/bin/tinygo`;
 	const reported = (await $`${tinygo} version`.text()).trim();
 	if (!reported.includes(commit.slice(0, 8))) throw new Error(`unexpected TinyGo: ${reported}`);
+	const patched = await buildPatchedTinyGo();
 
 	await applyRules(TINYGO, "tinygo-wasip1.yml");
 	cpSync(`${REPO}/scripts/overlay-tinygo-src`, TINYGO, { recursive: true });
@@ -67,10 +70,40 @@ async function build() {
 		const args = ["build", "-target=wasip1", "-no-debug", "-interp-timeout=30m", ...flags, `-ldflags=-X runtime.buildVersion=${version}`, ...(tags ? [`-tags=${tags}`] : []), "-o", `${built}/${name}.wasm`, pkg];
 		console.log(`tinygo ${args.join(" ")}`);
 		const started = performance.now();
-		await $`${tinygo} ${args}`.cwd(cwd).env({ ...env, GOROOT: goroot });
+		// The patched compiler gets its own cache: cached std objects must not be shared with the unpatched one.
+		const toolEnv = name === "compile" ? { ...env, GOROOT: goroot, XDG_CACHE_HOME: `${ROOT}/tinygo-cache-patched`, GOCACHE: `${ROOT}/tinygo-cache-patched/go-build` } : { ...env, GOROOT: goroot };
+		await $`${name === "compile" ? patched : tinygo} ${args}`.cwd(cwd).env(toolEnv);
 		console.log(`tinygo ${name}: ${Math.round((performance.now() - started) / 1000)} s`);
 	}));
 	console.log(JSON.stringify({ built, tools: specs.map(([name]) => `${name}.wasm`) }));
+}
+
+// TinyGo built from the pinned commit with patches/tinygo-*.patch, linked against upstream's stock LLVM release (the wasm backend is untouched in TinyGo's LLVM fork).
+async function buildPatchedTinyGo() {
+	const llvm = `${ROOT}/llvm/${llvmAsset}`;
+	if (!existsSync(`${llvm}/bin/llvm-config`)) {
+		const tarball = `${ROOT}/downloads/${llvmAsset}.tar.xz`;
+		if (!existsSync(tarball)) await $`gh release download ${llvmRelease} -R llvm/llvm-project -p ${`${llvmAsset}.tar.xz`} -D ${ROOT}/downloads`;
+		mkdirSync(`${ROOT}/llvm`, { recursive: true });
+		await $`tar -xJf ${tarball} -C ${ROOT}/llvm --wildcards ${`${llvmAsset}/include`} ${`${llvmAsset}/bin/llvm-config`} ${`${llvmAsset}/lib/lib*.a`} ${`${llvmAsset}/lib/libclang.so*`}`;
+		rmSync(tarball, { force: true });
+	}
+	const src = `${ROOT}/tinygo-src`;
+	rmSync(src, { recursive: true, force: true });
+	mkdirSync(src, { recursive: true });
+	await $`git init -q ${src}`;
+	await $`git -C ${src} fetch -q --depth 1 https://github.com/tinygo-org/tinygo.git ${commit}`;
+	await $`git -C ${src} checkout -q FETCH_HEAD`;
+	await applyRules(src, "tinygo-wasm-gc-roots.yml");
+	const config = (...args: string[]) => $`${llvm}/bin/llvm-config ${args}`.text().then(text => text.trim());
+	const system = (await config("--system-libs")).replace("/usr/lib/x86_64-linux-gnu/libzstd.a", "-lzstd").replace("/usr/lib/x86_64-linux-gnu/libz.a", "-lz");
+	const ldflags = `-L${llvm}/lib -lclang -lclang-cpp -Wl,--start-group ${lldLibs} -Wl,--end-group ${await config("--ldflags", "--libs")} ${system} -lstdc++ -Wl,-rpath,${llvm}/lib`;
+	const output = `${TINYGO}/bin/tinygo-patched`;
+	await $`${NATIVE_GO} build -buildmode exe -o ${output} -tags ${"byollvm llvm22 osusergo"} .`.cwd(src).env(goEnv({
+		GOROOT: GO, CGO_CPPFLAGS: `${await config("--cppflags")} -I${llvm}/include`, CGO_CXXFLAGS: "-std=c++17", CGO_LDFLAGS: ldflags,
+	}));
+	console.log((await $`${output} version`.env({ ...process.env, TINYGOROOT: TINYGO }).text()).trim());
+	return output;
 }
 
 // Lays the TinyGo tools over a copy of dist/ and rewrites their manifest entries.
@@ -93,7 +126,7 @@ async function merge() {
 		sizes.push({ path: `${name}.wasm`, size: bytes.length });
 	}
 	const files = (dir: string) => [...new Bun.Glob("**/*.go").scanSync({ cwd: `${REPO}/${dir}` })].sort().map(path => `${dir}/${path}`);
-	const tinygoFiles = ["patches/tinygo-wasip1.yml", "patches/go-tinygo-template-calls.yml", "patches/go-tinygo-ssa-cache.yml", ...files("scripts/trim"), ...files("scripts/overlay-tinygo"), ...files("scripts/overlay-tinygo-src")];
+	const tinygoFiles = ["patches/tinygo-wasip1.yml", "patches/go-tinygo-template-calls.yml", "patches/go-tinygo-ssa-cache.yml", "patches/tinygo-wasm-gc-roots.yml", ...files("scripts/trim"), ...files("scripts/overlay-tinygo"), ...files("scripts/overlay-tinygo-src")];
 	const tinygoHashes: { path: string; sha256: string }[] = [];
 	for (const path of tinygoFiles) tinygoHashes.push({ path, sha256: await hash(`${REPO}/${path}`) });
 	manifest.provenance.tinygo = { commit, files: tinygoHashes, tools: sizes.map(b => b.path) };

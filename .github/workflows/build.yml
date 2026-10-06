@@ -65,6 +65,9 @@ jobs:
       - name: setup
         run: bun scripts/setup.ts
 
+      - name: install TinyGo build dependencies
+        run: sudo apt-get install -y --no-install-recommends libzstd-dev zlib1g-dev
+
       - parallel:
           - name: build and gate standard-Go dist
             run: |
